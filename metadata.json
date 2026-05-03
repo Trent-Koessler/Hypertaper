@@ -1,0 +1,6 @@
+{
+  "name": "HyperTaper",
+  "description": "A professional-grade hyperbolic deprescribing planner that calculates safe medication tapering schedules using available tablet denominations and customized reduction rates.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
