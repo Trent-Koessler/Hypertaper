@@ -117,14 +117,14 @@ const App: React.FC = () => {
     text += `Start Dose: ${drug.currentDose}${drug.unit}\n\n`;
     
     text += `Date`.padEnd(dateColWidth) + `Dose`.padEnd(doseColWidth) + `Instructions\n`;
-    text += `-`.repeat(50) + `\n`;
+    text += `-`.repeat(80) + `\n`;
     
     schedule.steps.forEach(step => {
       const dateStr = new Date(step.date).toLocaleDateString(undefined, {month: 'short', day: '2-digit', year: 'numeric'});
       if (step.isStop) {
         text += `${dateStr}`.padEnd(dateColWidth) + `STOP`.padEnd(doseColWidth) + `Cease medication\n`;
       } else {
-        const tabletsText = Object.entries(step.tablets)
+        const dailyText = Object.entries(step.tablets)
           .filter(([_, count]) => count > 0)
           .map(([id, count]) => {
             const denom = drug.denominations.find(d => d.id === id);
@@ -132,8 +132,28 @@ const App: React.FC = () => {
           })
           .filter(Boolean)
           .join(', ');
+          
+        const stepTotalText = Object.entries(step.tablets)
+          .filter(([_, count]) => count > 0)
+          .map(([id, count]) => {
+            const denom = drug.denominations.find(d => d.id === id);
+            const total = count * wean.intervalDays;
+            return denom ? `${total.toFixed(total % 1 === 0 ? 0 : 2)}x ${denom.strength}${drug.unit}` : '';
+          })
+          .filter(Boolean)
+          .join(', ');
         
-        text += `${dateStr}`.padEnd(dateColWidth) + `${step.actualDose}${drug.unit}`.padEnd(doseColWidth) + `${tabletsText}\n`;
+        const instrText = `${dailyText} daily (Step total: ${stepTotalText})`;
+        text += `${dateStr}`.padEnd(dateColWidth) + `${step.actualDose}${drug.unit}`.padEnd(doseColWidth) + `${instrText}\n`;
+      }
+    });
+
+    text += `\n` + `-`.repeat(80) + `\n`;
+    text += `Total Medication Required for Full Plan:\n`;
+    Object.entries(schedule.totalTablets).forEach(([id, count]) => {
+      const denom = drug.denominations.find(d => d.id === id);
+      if (denom) {
+        text += `- ${count.toFixed(count % 1 === 0 ? 0 : 2)}x ${denom.strength}${drug.unit} tablets\n`;
       }
     });
     
@@ -472,6 +492,19 @@ const App: React.FC = () => {
                       </td>
                       <td className="px-6 py-4">
                         <TabletVisualizer counts={step.tablets} denominations={drug.denominations} />
+                        {!step.isStop && (
+                          <div className="mt-2 text-[11px] text-slate-500 dark:text-slate-400 border-t border-slate-100 dark:border-slate-700/50 pt-2 font-medium">
+                            Step Total: {Object.entries(step.tablets)
+                              .filter(([_, count]) => count > 0)
+                              .map(([id, count]) => {
+                                const denom = drug.denominations.find(d => d.id === id);
+                                const total = count * wean.intervalDays;
+                                return denom ? `${total.toFixed(total % 1 === 0 ? 0 : 2)}x ${denom.strength}${drug.unit}` : '';
+                              })
+                              .filter(Boolean)
+                              .join(', ')}
+                          </div>
+                        )}
                       </td>
                     </tr>
                   ))}
