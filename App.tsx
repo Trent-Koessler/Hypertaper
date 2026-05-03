@@ -109,15 +109,20 @@ const App: React.FC = () => {
   const generateEmrText = () => {
     if (!schedule) return '';
     
+    const dateColWidth = 15;
+    const doseColWidth = 12;
+
     let text = `Medication Taper Plan\n`;
     text += `Drug: ${drug.name}\n`;
     text += `Start Dose: ${drug.currentDose}${drug.unit}\n\n`;
-    text += `Date\tDose\tInstructions\n`;
+    
+    text += `Date`.padEnd(dateColWidth) + `Dose`.padEnd(doseColWidth) + `Instructions\n`;
+    text += `-`.repeat(50) + `\n`;
     
     schedule.steps.forEach(step => {
-      const dateStr = new Date(step.date).toLocaleDateString(undefined, {month: 'short', day: 'numeric', year: 'numeric'});
+      const dateStr = new Date(step.date).toLocaleDateString(undefined, {month: 'short', day: '2-digit', year: 'numeric'});
       if (step.isStop) {
-        text += `${dateStr}\tSTOP\tCease medication\n`;
+        text += `${dateStr}`.padEnd(dateColWidth) + `STOP`.padEnd(doseColWidth) + `Cease medication\n`;
       } else {
         const tabletsText = Object.entries(step.tablets)
           .filter(([_, count]) => count > 0)
@@ -128,7 +133,7 @@ const App: React.FC = () => {
           .filter(Boolean)
           .join(', ');
         
-        text += `${dateStr}\t${step.actualDose}${drug.unit}\t${tabletsText}\n`;
+        text += `${dateStr}`.padEnd(dateColWidth) + `${step.actualDose}${drug.unit}`.padEnd(doseColWidth) + `${tabletsText}\n`;
       }
     });
     
