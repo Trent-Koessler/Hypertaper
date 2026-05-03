@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Pill, Calculator, Calendar, Activity, Info, AlertCircle, Plus, Trash2, ArrowRight, Download, Scissors, Sun, Moon } from 'lucide-react';
+import { Pill, Calculator, Calendar, Activity, Info, AlertCircle, Plus, Trash2, ArrowRight, Download, Scissors, Sun, Moon, Copy } from 'lucide-react';
 import { DrugConfig, WeanConfig, Denomination, ScheduleResult } from './types';
 import { generateSchedule } from './services/weaningLogic';
 import WeanChart from './components/WeanChart';
@@ -104,6 +104,35 @@ const App: React.FC = () => {
 
   const printSchedule = () => {
     window.print();
+  };
+
+  const generateEmrText = () => {
+    if (!schedule) return '';
+    
+    let text = `Medication Taper Plan\n`;
+    text += `Drug: ${drug.name}\n`;
+    text += `Start Dose: ${drug.currentDose}${drug.unit}\n\n`;
+    text += `Date\tDose\tInstructions\n`;
+    
+    schedule.steps.forEach(step => {
+      const dateStr = new Date(step.date).toLocaleDateString(undefined, {month: 'short', day: 'numeric', year: 'numeric'});
+      if (step.isStop) {
+        text += `${dateStr}\tSTOP\tCease medication\n`;
+      } else {
+        const tabletsText = Object.entries(step.tablets)
+          .filter(([_, count]) => count > 0)
+          .map(([id, count]) => {
+            const denom = drug.denominations.find(d => d.id === id);
+            return denom ? `${count}x ${denom.strength}${drug.unit}` : '';
+          })
+          .filter(Boolean)
+          .join(', ');
+        
+        text += `${dateStr}\t${step.actualDose}${drug.unit}\t${tabletsText}\n`;
+      }
+    });
+    
+    return text;
   };
 
   return (
@@ -367,6 +396,29 @@ const App: React.FC = () => {
 
           {/* Chart */}
           {schedule && <WeanChart steps={schedule.steps} unit={drug.unit} isDarkMode={isDarkMode} />}
+
+          {/* EMR Friendly Text */}
+          {schedule && (
+            <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-600 p-6 transition-colors duration-200">
+              <div className="flex justify-between items-center mb-4">
+                 <h3 className="font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-2">
+                   <Copy className="w-4 h-4" /> 
+                   EMR-Friendly Text
+                 </h3>
+                 <button 
+                   onClick={() => navigator.clipboard.writeText(generateEmrText())}
+                   className="text-xs bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-600 dark:text-slate-300 px-3 py-1.5 rounded-full transition-colors flex items-center gap-2 font-medium"
+                 >
+                   Copy to Clipboard
+                 </button>
+              </div>
+              <textarea
+                readOnly
+                value={generateEmrText()}
+                className="w-full h-40 p-3 text-sm font-mono border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-300 rounded-lg outline-none resize-y"
+              />
+            </div>
+          )}
 
           {/* Detailed List */}
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 dark:border-slate-600 overflow-hidden">
