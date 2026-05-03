@@ -426,9 +426,9 @@ const App: React.FC = () => {
           )}
 
           {/* Detailed List */}
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 dark:border-slate-600 overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50 dark:bg-slate-700/50">
-               <h3 className="font-semibold text-slate-700 flex items-center gap-2">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-800/50">
+               <h3 className="font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-2">
                  <Calendar className="w-4 h-4" /> 
                  Deprescribing Schedule
                </h3>
@@ -436,7 +436,7 @@ const App: React.FC = () => {
 
             <div className="overflow-x-auto">
               <table className="w-full text-sm text-left">
-                <thead className="bg-slate-50 dark:bg-slate-700/50 text-slate-500 font-medium">
+                <thead className="bg-slate-50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400 font-medium">
                   <tr>
                     <th className="px-6 py-3">Date</th>
                     <th className="px-6 py-3">Step</th>
@@ -444,13 +444,13 @@ const App: React.FC = () => {
                     <th className="px-6 py-3">Tablets Required (Daily)</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                   {schedule?.steps.map((step, idx) => (
-                    <tr key={idx} className={`hover:bg-slate-50 dark:bg-slate-700/50 transition-colors ${step.isStop ? 'bg-green-50/50 dark:bg-green-900/20' : ''}`}>
+                    <tr key={idx} className={`hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors ${step.isStop ? 'bg-green-50/50 dark:bg-green-900/20' : ''}`}>
                       <td className="px-6 py-4 font-medium text-slate-700 dark:text-slate-200 whitespace-nowrap">
                         {new Date(step.date).toLocaleDateString(undefined, {weekday: 'short', month: 'short', day: 'numeric'})}
                       </td>
-                      <td className="px-6 py-4 text-slate-500 dark:text-slate-400">
+                      <td className="px-6 py-4 text-slate-500 dark:text-slate-300">
                         {step.isStop ? <span className="text-green-600 dark:text-green-400 font-bold">STOP</span> : `Week ${Math.floor(step.dayIndex / 7) + 1}`}
                       </td>
                       <td className="px-6 py-4">
@@ -459,7 +459,7 @@ const App: React.FC = () => {
                              {step.actualDose}{drug.unit}
                            </span>
                            {!step.isStop && (
-                             <span className="text-xs text-slate-400">
+                             <span className="text-xs text-slate-500 dark:text-slate-400">
                                Target: {step.targetDose}{drug.unit}
                              </span>
                            )}
