@@ -446,16 +446,16 @@ const App: React.FC = () => {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {schedule?.steps.map((step, idx) => (
-                    <tr key={idx} className={`hover:bg-slate-50 dark:bg-slate-700/50 transition-colors ${step.isStop ? 'bg-green-50/50' : ''}`}>
-                      <td className="px-6 py-4 font-medium text-slate-700 whitespace-nowrap">
+                    <tr key={idx} className={`hover:bg-slate-50 dark:bg-slate-700/50 transition-colors ${step.isStop ? 'bg-green-50/50 dark:bg-green-900/20' : ''}`}>
+                      <td className="px-6 py-4 font-medium text-slate-700 dark:text-slate-200 whitespace-nowrap">
                         {new Date(step.date).toLocaleDateString(undefined, {weekday: 'short', month: 'short', day: 'numeric'})}
                       </td>
-                      <td className="px-6 py-4 text-slate-500">
-                        {step.isStop ? <span className="text-green-600 font-bold">STOP</span> : `Week ${Math.floor(step.dayIndex / 7) + 1}`}
+                      <td className="px-6 py-4 text-slate-500 dark:text-slate-400">
+                        {step.isStop ? <span className="text-green-600 dark:text-green-400 font-bold">STOP</span> : `Week ${Math.floor(step.dayIndex / 7) + 1}`}
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex flex-col">
-                           <span className="font-semibold text-slate-800">
+                           <span className="font-semibold text-slate-800 dark:text-slate-100">
                              {step.actualDose}{drug.unit}
                            </span>
                            {!step.isStop && (
@@ -488,11 +488,11 @@ const App: React.FC = () => {
                     const denom = drug.denominations.find(d => d.id === id);
                     if(!denom) return null;
                     return (
-                      <div key={id} className="bg-white px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-600 shadow-sm flex items-center gap-3">
-                         <div className="bg-blue-100 text-blue-700 font-bold px-2 py-1 rounded text-xs">
+                      <div key={id} className="bg-white dark:bg-slate-800 px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-600 shadow-sm flex items-center gap-3">
+                         <div className="bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 font-bold px-2 py-1 rounded text-xs">
                            {denom.strength}{drug.unit}
                          </div>
-                         <div className="text-slate-600 font-medium">
+                         <div className="text-slate-600 dark:text-slate-300 font-medium">
                            {count.toFixed(count % 1 === 0 ? 0 : 2)} <span className="text-xs text-slate-400 font-normal">tablets</span>
                          </div>
                       </div>
