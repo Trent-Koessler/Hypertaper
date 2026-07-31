@@ -1,183 +1,280 @@
 import { DrugConfig, WeanConfig, ScheduleResult, ScheduleStep, Denomination } from '../types';
+import { addDaysISO, isValidISODate, todayISO } from './dateUtils';
 
-interface ExpandedOption {
-  originalId: string;
+/** A physically takeable piece: a whole tablet, or a half/quarter of one. */
+interface Piece {
+  denomId: string;
   strength: number;
-  cost: number; // 1 for whole, 0.5 for half, 0.25 for quarter
+  tabletFraction: number; // 1 for a whole tablet, 0.5 for a half, 0.25 for a quarter
+  cost: number; // Preference weight: fewer pieces first, then fewer cuts
+}
+
+// Costs are compared as a sum, so the piece-count term must dominate the
+// splitting term. Whole tablets are preferred over halves at equal piece count.
+const COST_WHOLE = 10;
+const COST_HALF = 11;
+const COST_QUARTER = 12;
+
+/** Doses are quantised to this resolution (0.001 of a unit) before searching. */
+const SCALE = 1000;
+/** Upper bound on DP table size, so pathological strengths cannot hang the UI. */
+const MAX_STATES = 200_000;
+const MAX_ITERATIONS = 500;
+const UNREACHABLE = 0x7fffffff;
+
+function gcd(a: number, b: number): number {
+  while (b) [a, b] = [b, a % b];
+  return a;
+}
+
+function roundDose(value: number): number {
+  return parseFloat(value.toFixed(4));
+}
+
+/** Expands the configured denominations into every piece the patient could take. */
+export function buildPieces(denominations: Denomination[]): Piece[] {
+  const pieces: Piece[] = [];
+  denominations.forEach(d => {
+    // A blank row (the state a freshly added denomination starts in) or a
+    // nonsensical strength contributes nothing but search space.
+    if (!Number.isFinite(d.strength) || d.strength <= 0) return;
+
+    pieces.push({ denomId: d.id, strength: d.strength, tabletFraction: 1, cost: COST_WHOLE });
+
+    if (d.canSplit === 'half' || d.canSplit === 'quarter') {
+      pieces.push({ denomId: d.id, strength: d.strength / 2, tabletFraction: 0.5, cost: COST_HALF });
+    }
+    if (d.canSplit === 'quarter') {
+      pieces.push({ denomId: d.id, strength: d.strength / 4, tabletFraction: 0.25, cost: COST_QUARTER });
+    }
+  });
+  return pieces;
 }
 
 /**
- * Finds the combination of tablets that minimizes the difference between
- * the total strength and the target dose.
- * Returns the counts for each denomination and the actual resulting dose.
+ * Finds the largest dose that is achievable with the available pieces and does
+ * *not* exceed the target, preferring the fewest pieces and the fewest cuts.
+ *
+ * Deliberately never rounds up: a deprescribing plan must not instruct a dose
+ * above the taper target. When nothing at or below the target can be made, the
+ * result is 0, which is the signal that the taper has run out of room.
+ *
+ * Runs an unbounded-knapsack DP over doses quantised to a common unit, so cost
+ * is O(states x pieces) rather than exponential in the number of denominations.
  */
-function findBestTabletCombination(
+export function findBestTabletCombination(
   targetDose: number,
   denominations: Denomination[]
 ): { actualDose: number; tablets: { [id: string]: number } } {
-  if (targetDose <= 0) {
-    return { actualDose: 0, tablets: {} };
+  const empty = { actualDose: 0, tablets: {} };
+  if (!Number.isFinite(targetDose) || targetDose <= 0) return empty;
+
+  const pieces = buildPieces(denominations);
+  if (pieces.length === 0) return empty;
+
+  const scaledTarget = Math.floor(targetDose * SCALE + 1e-6);
+  if (scaledTarget <= 0) return empty;
+
+  const scaledStrengths = pieces.map(p => Math.max(1, Math.round(p.strength * SCALE)));
+
+  // Working in units of the greatest common divisor keeps the table tiny for
+  // real-world strengths (a 0.5mg tablet split into quarters gives a 0.125 unit).
+  let unit = scaledStrengths.reduce((a, b) => gcd(a, b));
+  unit = Math.max(unit, Math.ceil(scaledTarget / MAX_STATES));
+
+  // Rounding each piece *up* to the grid guarantees the reconstructed exact dose
+  // still lands at or below the target even when the grid has been coarsened.
+  const pieceUnits = scaledStrengths.map(s => Math.ceil(s / unit));
+  const cap = Math.floor(scaledTarget / unit);
+  if (cap <= 0) return empty;
+
+  const cost = new Int32Array(cap + 1).fill(UNREACHABLE);
+  const cameFrom = new Int32Array(cap + 1).fill(-1);
+  cost[0] = 0;
+
+  for (let value = 1; value <= cap; value++) {
+    let best = UNREACHABLE;
+    let bestPiece = -1;
+    for (let k = 0; k < pieceUnits.length; k++) {
+      const size = pieceUnits[k];
+      if (size > value) continue;
+      const previous = cost[value - size];
+      if (previous === UNREACHABLE) continue;
+      const candidate = previous + pieces[k].cost;
+      if (candidate < best) {
+        best = candidate;
+        bestPiece = k;
+      }
+    }
+    cost[value] = best;
+    cameFrom[value] = bestPiece;
   }
 
-  // Expand denominations into all possible physical pieces (Whole, Half, Quarter)
-  const options: ExpandedOption[] = [];
-  denominations.forEach(d => {
-    // Always add whole tablet
-    options.push({ originalId: d.id, strength: d.strength, cost: 1 });
-    
-    // Add half if allowed
-    if (d.canSplit === 'half' || d.canSplit === 'quarter') {
-      options.push({ originalId: d.id, strength: d.strength / 2, cost: 0.5 });
-    }
-    
-    // Add quarter if allowed
-    if (d.canSplit === 'quarter') {
-      options.push({ originalId: d.id, strength: d.strength / 4, cost: 0.25 });
-    }
-  });
+  let value = cap;
+  while (value > 0 && cost[value] === UNREACHABLE) value--;
+  if (value === 0) return empty;
 
-  // Sort options descending by strength to prioritize larger pieces (greedy-ish approach)
-  const sortedOptions = options.sort((a, b) => b.strength - a.strength);
-  
-  if (sortedOptions.length === 0) return { actualDose: 0, tablets: {} };
-
-  const minStrength = sortedOptions[sortedOptions.length - 1].strength;
-  
-  let bestDiff = Infinity;
-  let bestCombo: { [index: number]: number } = {}; // Index in sortedOptions -> count
-  let bestActual = 0;
-
-  // Base greedy fill for large doses to optimize performance
-  let baseActual = 0;
-  let remainingTarget = targetDose;
-  const baseCounts: { [index: number]: number } = {};
-  
-  // Use the largest available whole tablet for bulk filling
-  const largestOptionIndex = sortedOptions.findIndex(o => o.cost === 1); 
-  if (largestOptionIndex !== -1) {
-    const largest = sortedOptions[largestOptionIndex];
-    if (targetDose > largest.strength * 5) {
-       const bulkCount = Math.floor((targetDose - (largest.strength * 4)) / largest.strength);
-       if (bulkCount > 0) {
-           baseCounts[largestOptionIndex] = bulkCount;
-           baseActual += bulkCount * largest.strength;
-           remainingTarget -= bulkCount * largest.strength;
-       }
-    }
+  const tablets: { [id: string]: number } = {};
+  let exactDose = 0;
+  while (value > 0) {
+    const index = cameFrom[value];
+    if (index < 0) break;
+    const piece = pieces[index];
+    tablets[piece.denomId] = (tablets[piece.denomId] || 0) + piece.tabletFraction;
+    exactDose += piece.strength;
+    value -= pieceUnits[index];
   }
 
-  function solve(index: number, currentSum: number, counts: { [index: number]: number }) {
-    const diff = Math.abs(currentSum - remainingTarget);
-    
-    // Update best if this is closer
-    if (diff < bestDiff - 0.0001) { // Epsilon for float comparison
-        bestDiff = diff;
-        bestActual = baseActual + currentSum;
-        bestCombo = { ...counts };
-    } else if (Math.abs(diff - bestDiff) < 0.0001) {
-        // Tie-breaker: prefer fewer physical pieces/cuts (sum of costs isn't quite right, we want simplicity)
-        // Let's use total 'cost' (number of tablets used) as tie breaker
-        const currentCost = Object.entries(counts).reduce((acc, [idx, cnt]) => acc + (cnt * sortedOptions[Number(idx)].cost), 0);
-        const bestCost = Object.entries(bestCombo).reduce((acc, [idx, cnt]) => acc + (cnt * sortedOptions[Number(idx)].cost), 0);
-        
-        if (currentCost < bestCost) {
-             bestActual = baseActual + currentSum;
-             bestCombo = { ...counts };
-        }
-    }
+  return { actualDose: roundDose(exactDose), tablets };
+}
 
-    if (index >= sortedOptions.length) return;
-    
-    // Pruning
-    if (currentSum > remainingTarget + minStrength) return;
+function emptyResult(warnings: string[]): ScheduleResult {
+  return { steps: [], totalTablets: {}, durationWeeks: 0, reductionStepCount: 0, warnings };
+}
 
-    const option = sortedOptions[index];
-    // Heuristic limit: don't add more than necessary to cover remaining
-    // For smaller pieces (quarters), we might need up to 3 to make a whole, but since we have whole options sorted first, 
-    // we only need enough to cover the "gap" between wholes.
-    // Generally 0-2 of a specific fragment size is enough if we have the larger sizes available.
-    // However, if we only have 10mg and need 2.5mg, we pick one 2.5mg option.
-    const maxUseful = Math.ceil((remainingTarget - currentSum) / option.strength) + 1; 
-    const limit = Math.min(5, Math.max(0, maxUseful));
+function validate(drug: DrugConfig, wean: WeanConfig, warnings: string[]): boolean {
+  let usable = true;
 
-    for (let i = 0; i <= limit; i++) {
-        const nextCounts = { ...counts };
-        if (i > 0) nextCounts[index] = (nextCounts[index] || 0) + i;
-        solve(index + 1, currentSum + (i * option.strength), nextCounts);
-    }
+  if (buildPieces(drug.denominations).length === 0) {
+    warnings.push('Add at least one tablet strength greater than zero to generate a schedule.');
+    usable = false;
+  }
+  if (!Number.isFinite(drug.currentDose) || drug.currentDose <= 0) {
+    warnings.push('Enter a current dose greater than zero.');
+    usable = false;
+  }
+  if (!Number.isFinite(wean.reductionValue) || wean.reductionValue <= 0) {
+    warnings.push(
+      wean.reductionType === 'percentage'
+        ? 'Enter a reduction percentage greater than zero.'
+        : 'Enter a reduction amount greater than zero.'
+    );
+    usable = false;
+  }
+  if (wean.reductionType === 'percentage' && wean.reductionValue > 100) {
+    warnings.push('A reduction above 100% is not meaningful; use 100% to stop in a single step.');
+    usable = false;
+  }
+  if (!Number.isFinite(wean.intervalDays) || wean.intervalDays < 1) {
+    warnings.push('The interval between reductions must be at least one day; using 1 day.');
   }
 
-  solve(0, 0, {});
-
-  // Aggregate results back to original denomination IDs
-  const finalTablets: { [id: string]: number } = {};
-  
-  // Add base counts
-  Object.entries(baseCounts).forEach(([idx, count]) => {
-      const opt = sortedOptions[Number(idx)];
-      finalTablets[opt.originalId] = (finalTablets[opt.originalId] || 0) + (count * opt.cost);
-  });
-
-  // Add optimized remainder counts
-  Object.entries(bestCombo).forEach(([idx, count]) => {
-      const opt = sortedOptions[Number(idx)];
-      finalTablets[opt.originalId] = (finalTablets[opt.originalId] || 0) + (count * opt.cost);
-  });
-  
-  return {
-    actualDose: parseFloat(bestActual.toFixed(3)),
-    tablets: finalTablets
-  };
+  return usable;
 }
 
 export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleResult {
-  const steps: ScheduleStep[] = [];
-  const totalTablets: { [denomId: string]: number } = {};
-  
-  let currentTarget = drug.currentDose;
-  let currentDate = new Date(drug.startDate);
+  const warnings: string[] = [];
+  if (!validate(drug, wean, warnings)) return emptyResult(warnings);
+
+  const intervalDays = Number.isFinite(wean.intervalDays) ? Math.max(1, Math.round(wean.intervalDays)) : 1;
+  const threshold = Number.isFinite(wean.minimumDoseThreshold) ? Math.max(0, wean.minimumDoseThreshold) : 0;
+  const startDate = isValidISODate(drug.startDate) ? drug.startDate : todayISO();
+  if (!isValidISODate(drug.startDate)) {
+    warnings.push('The start date was not a valid date; using today instead.');
+  }
+
+  // 1. Walk the taper curve, recording the achievable dose at each interval.
+  const holds: { targetDose: number; actualDose: number; tablets: { [id: string]: number } }[] = [];
+  let target = drug.currentDose;
   let iteration = 0;
-  
-  const MAX_ITERATIONS = 500; 
+  let ranOutOfRoom = false;
 
-  while (currentTarget > wean.minimumDoseThreshold && iteration < MAX_ITERATIONS) {
-    const { actualDose, tablets } = findBestTabletCombination(currentTarget, drug.denominations);
-    
-    steps.push({
-      date: currentDate.toISOString().split('T')[0],
-      dayIndex: iteration * wean.intervalDays,
-      targetDose: parseFloat(currentTarget.toFixed(3)),
-      actualDose,
-      tablets,
-      isStop: false
-    });
+  while (target > threshold && iteration < MAX_ITERATIONS) {
+    const { actualDose, tablets } = findBestTabletCombination(target, drug.denominations);
 
-    Object.entries(tablets).forEach(([id, count]) => {
-      totalTablets[id] = (totalTablets[id] || 0) + count * wean.intervalDays;
-    });
-
-    if (wean.reductionType === 'fixed') {
-      currentTarget = currentTarget - wean.reductionValue;
-    } else {
-      currentTarget = currentTarget * (1 - (wean.reductionValue / 100));
+    // No combination of the available tablets can reach the target without
+    // exceeding it: the taper is finished, whatever the arithmetic target says.
+    if (actualDose <= 0) {
+      ranOutOfRoom = true;
+      break;
     }
 
-    currentDate.setDate(currentDate.getDate() + wean.intervalDays);
+    holds.push({ targetDose: roundDose(target), actualDose, tablets });
+
+    target = wean.reductionType === 'fixed'
+      ? target - wean.reductionValue
+      : target * (1 - wean.reductionValue / 100);
     iteration++;
   }
 
+  if (iteration >= MAX_ITERATIONS) {
+    warnings.push(
+      `The schedule was truncated at ${MAX_ITERATIONS} reductions. Try a larger reduction or a higher stop dose.`
+    );
+  }
+
+  if (holds.length === 0) {
+    warnings.push('The current dose is already at or below the stop dose, so there is nothing to taper.');
+    return emptyResult(warnings);
+  }
+
+  // 2. Collapse consecutive intervals that prescribe the same dose into a single
+  //    held step, so the plan reads as "50mg for 28 days" rather than repeating rows.
+  const steps: ScheduleStep[] = [];
+  const totalTablets: { [denomId: string]: number } = {};
+  let dayIndex = 0;
+
+  holds.forEach(hold => {
+    const previous = steps[steps.length - 1];
+    if (previous && previous.actualDose === hold.actualDose) {
+      previous.durationDays += intervalDays;
+    } else {
+      steps.push({
+        date: addDaysISO(startDate, dayIndex),
+        dayIndex,
+        durationDays: intervalDays,
+        // Report the target that first justified this dose.
+        targetDose: hold.targetDose,
+        actualDose: hold.actualDose,
+        tablets: hold.tablets,
+        isStop: false
+      });
+    }
+    dayIndex += intervalDays;
+  });
+
+  steps.forEach(step => {
+    Object.entries(step.tablets).forEach(([id, count]) => {
+      totalTablets[id] = roundDose((totalTablets[id] || 0) + count * step.durationDays);
+    });
+  });
+
   steps.push({
-    date: currentDate.toISOString().split('T')[0],
-    dayIndex: iteration * wean.intervalDays,
+    date: addDaysISO(startDate, dayIndex),
+    dayIndex,
+    durationDays: 0,
     targetDose: 0,
     actualDose: 0,
     tablets: {},
     isStop: true
   });
 
+  // 3. Warn when the available tablets cannot express the requested curve.
+  const smallestPiece = Math.min(...buildPieces(drug.denominations).map(p => p.strength));
+  if (steps[0].actualDose < drug.currentDose) {
+    warnings.push(
+      `A dose of ${drug.currentDose}${drug.unit} cannot be made from the available strengths; the plan starts at ${steps[0].actualDose}${drug.unit}.`
+    );
+  }
+  const firstReduction = wean.reductionType === 'percentage'
+    ? drug.currentDose * (wean.reductionValue / 100)
+    : wean.reductionValue;
+  if (smallestPiece > firstReduction) {
+    warnings.push(
+      `The smallest available piece is ${roundDose(smallestPiece)}${drug.unit}, which is larger than the requested reduction of ${roundDose(firstReduction)}${drug.unit}. The taper cannot follow the requested curve — add a smaller strength or allow splitting.`
+    );
+  }
+  if (ranOutOfRoom && steps[steps.length - 2].actualDose > threshold) {
+    warnings.push(
+      `The taper stops at ${steps[steps.length - 2].actualDose}${drug.unit} rather than ${threshold}${drug.unit}, because no smaller dose can be made from the available strengths.`
+    );
+  }
+
   return {
     steps,
     totalTablets,
-    durationWeeks: Math.ceil((iteration * wean.intervalDays) / 7)
+    durationWeeks: Math.ceil(dayIndex / 7),
+    reductionStepCount: Math.max(0, steps.length - 2),
+    warnings
   };
 }

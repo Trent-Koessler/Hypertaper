@@ -1,6 +1,7 @@
 import React from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { ScheduleStep } from '../types';
+import { formatISODate } from '../services/dateUtils';
 
 interface WeanChartProps {
   steps: ScheduleStep[];
@@ -24,7 +25,7 @@ const WeanChart: React.FC<WeanChartProps> = ({ steps, unit, isDarkMode }) => {
           <XAxis 
             dataKey="date" 
             tick={{ fontSize: 10, fill: '#94a3b8' }} 
-            tickFormatter={(value) => new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric'})}
+            tickFormatter={(value) => formatISODate(value, { month: 'short', day: 'numeric' })}
           />
           <YAxis 
             tick={{ fontSize: 10, fill: '#94a3b8' }} 
@@ -34,7 +35,7 @@ const WeanChart: React.FC<WeanChartProps> = ({ steps, unit, isDarkMode }) => {
             contentStyle={{ backgroundColor: isDarkMode ? '#1e293b' : '#fff', borderRadius: '8px', border: `1px solid ${isDarkMode ? '#334155' : '#e2e8f0'}`, boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
             itemStyle={{ fontSize: '12px', color: isDarkMode ? '#e2e8f0' : '#0f172a' }}
             formatter={(value: number) => [`${value} ${unit}`, 'Dose']}
-            labelFormatter={(label) => new Date(label).toLocaleDateString()}
+            labelFormatter={(label) => formatISODate(String(label), { dateStyle: 'medium' })}
           />
           <Line 
             type="monotone" 
