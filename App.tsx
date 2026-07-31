@@ -300,8 +300,13 @@ const App: React.FC = () => {
                     onChange={e => setDrug({...drug, unit: e.target.value})}
                     className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg outline-none bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-100"
                   >
+                    {/*
+                      Only solid-dose strength units. "ml" implied a liquid,
+                      which has no fixed denominations and cannot be halved or
+                      quartered, so every plan built on it was wrong. It returns
+                      with proper continuous-formulation support.
+                    */}
                     <option value="mg">mg</option>
-                    <option value="ml">ml</option>
                     <option value="mcg">mcg</option>
                   </select>
                 </div>
@@ -506,7 +511,12 @@ const App: React.FC = () => {
               </div>
 
               {/* Chart */}
-              <WeanChart steps={schedule.steps} unit={drug.unit} isDarkMode={isDarkMode} />
+              <WeanChart
+                steps={schedule.steps}
+                targetCurve={schedule.targetCurve}
+                unit={drug.unit}
+                isDarkMode={isDarkMode}
+              />
 
               {/* EMR Friendly Text */}
               <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 p-6 transition-colors duration-200 print:hidden">
