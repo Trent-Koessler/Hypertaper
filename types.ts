@@ -8,7 +8,7 @@ export interface Denomination {
 export interface DrugConfig {
   name: string;
   currentDose: number;
-  unit: string; // e.g. "mg", "ml"
+  unit: string; // Strength unit of the solid dose form, e.g. "mg", "mcg"
   startDate: string; // ISO date string
   denominations: Denomination[];
 }
@@ -32,6 +32,11 @@ export interface ScheduleStep {
 
 export interface ScheduleResult {
   steps: ScheduleStep[];
+  /**
+   * The ideal taper curve sampled once per reduction interval. Steps collapse
+   * repeated doses, so they are too sparse to plot the intended curve against.
+   */
+  targetCurve: { date: string; dose: number }[];
   totalTablets: { [denomId: string]: number };
   durationWeeks: number;
   reductionStepCount: number; // Number of dose *decreases*, excluding the starting dose

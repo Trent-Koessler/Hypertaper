@@ -166,6 +166,35 @@ describe('generateSchedule', () => {
     }
   });
 
+  it('samples the ideal curve at every interval, not just at dose changes', () => {
+    const result = generateSchedule(drug(DEFAULTS), wean());
+    // The plan collapses to two held doses, but the curve must stay dense
+    // enough to draw the intended hyperbolic shape between them.
+    expect(result.steps.filter(s => !s.isStop)).toHaveLength(2);
+    expect(result.targetCurve.length).toBeGreaterThan(result.steps.length);
+
+    const doses = result.targetCurve.map(p => p.dose);
+    for (let i = 1; i < doses.length; i++) {
+      expect(doses[i]).toBeLessThan(doses[i - 1]);
+    }
+  });
+
+  it('spans the ideal curve across the full plan', () => {
+    const result = generateSchedule(drug(DEFAULTS), wean());
+    expect(result.targetCurve[0].date).toBe(result.steps[0].date);
+    expect(result.targetCurve[result.targetCurve.length - 1].date)
+      .toBe(result.steps[result.steps.length - 1].date);
+    expect(result.targetCurve[result.targetCurve.length - 1].dose).toBeGreaterThanOrEqual(0);
+  });
+
+  it('spaces the ideal curve by the reduction interval', () => {
+    const result = generateSchedule(drug(FINE, { currentDose: 30 }), wean({ intervalDays: 7 }));
+    const dates = result.targetCurve.map(p => Date.parse(p.date));
+    for (let i = 1; i < dates.length - 1; i++) {
+      expect((dates[i] - dates[i - 1]) / 86_400_000).toBe(7);
+    }
+  });
+
   it('totals tablets using each step duration', () => {
     const result = generateSchedule(drug(DEFAULTS), wean());
     const expected: Record<string, number> = {};

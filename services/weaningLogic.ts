@@ -129,7 +129,7 @@ export function findBestTabletCombination(
 }
 
 function emptyResult(warnings: string[]): ScheduleResult {
-  return { steps: [], totalTablets: {}, durationWeeks: 0, reductionStepCount: 0, warnings };
+  return { steps: [], targetCurve: [], totalTablets: {}, durationWeeks: 0, reductionStepCount: 0, warnings };
 }
 
 function validate(drug: DrugConfig, wean: WeanConfig, warnings: string[]): boolean {
@@ -211,10 +211,12 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
   // 2. Collapse consecutive intervals that prescribe the same dose into a single
   //    held step, so the plan reads as "50mg for 28 days" rather than repeating rows.
   const steps: ScheduleStep[] = [];
+  const targetCurve: { date: string; dose: number }[] = [];
   const totalTablets: { [denomId: string]: number } = {};
   let dayIndex = 0;
 
-  holds.forEach(hold => {
+  holds.forEach((hold, index) => {
+    targetCurve.push({ date: addDaysISO(startDate, index * intervalDays), dose: hold.targetDose });
     const previous = steps[steps.length - 1];
     if (previous && previous.actualDose === hold.actualDose) {
       previous.durationDays += intervalDays;
@@ -249,6 +251,9 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
     isStop: true
   });
 
+  // Carry the ideal curve to the stop date so it spans the same range as the plan.
+  targetCurve.push({ date: addDaysISO(startDate, dayIndex), dose: roundDose(Math.max(0, target)) });
+
   // 3. Warn when the available tablets cannot express the requested curve.
   const smallestPiece = Math.min(...buildPieces(drug.denominations).map(p => p.strength));
   if (steps[0].actualDose < drug.currentDose) {
@@ -272,6 +277,7 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
 
   return {
     steps,
+    targetCurve,
     totalTablets,
     durationWeeks: Math.ceil(dayIndex / 7),
     reductionStepCount: Math.max(0, steps.length - 2),
