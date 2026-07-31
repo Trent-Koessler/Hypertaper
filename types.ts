@@ -23,9 +23,10 @@ export interface WeanConfig {
 export interface ScheduleStep {
   date: string;
   dayIndex: number;
+  durationDays: number; // How long this dose is held before the next change
   targetDose: number;
   actualDose: number;
-  tablets: { [denomId: string]: number }; // Count of each denomination
+  tablets: { [denomId: string]: number }; // Tablet-equivalents of each denomination (0.5 = one half)
   isStop: boolean;
 }
 
@@ -33,4 +34,6 @@ export interface ScheduleResult {
   steps: ScheduleStep[];
   totalTablets: { [denomId: string]: number };
   durationWeeks: number;
+  reductionStepCount: number; // Number of dose *decreases*, excluding the starting dose
+  warnings: string[];
 }

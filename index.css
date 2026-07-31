@@ -1,0 +1,55 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+/*
+ * "Print Plan" is the export path for the schedule, so the printed page drops
+ * the controls and chrome and keeps the plan itself on a white background.
+ */
+@media print {
+  @page {
+    margin: 1.5cm;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  main {
+    display: block !important;
+    max-width: none !important;
+    padding: 0 !important;
+  }
+
+  /* Cards lose their shadows and fills so the table reads cleanly on paper. */
+  .shadow-sm,
+  .shadow {
+    box-shadow: none !important;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  thead {
+    display: table-header-group;
+  }
+
+  tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  th,
+  td {
+    padding: 6px 8px !important;
+    border-bottom: 1px solid #cbd5e1 !important;
+  }
+}
