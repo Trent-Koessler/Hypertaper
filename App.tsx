@@ -5,6 +5,7 @@ import { generateSchedule } from './services/weaningLogic';
 import { formatISODate, todayISO } from './services/dateUtils';
 import WeanChart from './components/WeanChart';
 import TabletVisualizer from './components/TabletVisualizer';
+import CalculationBreakdown from './components/CalculationBreakdown';
 
 const COMMON_DRUGS = [
   "Sertraline",
@@ -69,13 +70,15 @@ const describeDuration = (days: number): string => {
 
 const App: React.FC = () => {
   const [drug, setDrug] = useState<DrugConfig>({
-    name: 'Sertraline',
-    currentDose: 50,
+    name: 'Diazepam',
+    // 10mg is a common starting point for a benzodiazepine taper, and quartered
+    // 2mg tablets take it down to 0.5mg without a steeper-than-requested step.
+    currentDose: 10,
     unit: 'mg',
     startDate: todayISO(),
     denominations: [
-      { id: '1', strength: 50, canSplit: 'half' },
-      { id: '2', strength: 25, canSplit: 'no' }
+      { id: '1', strength: 5, canSplit: 'quarter' },
+      { id: '2', strength: 2, canSplit: 'quarter' }
     ]
   });
 
@@ -106,7 +109,7 @@ const App: React.FC = () => {
   const addDenom = () => {
     setDrug(prev => ({
       ...prev,
-      denominations: [...prev.denominations, { id: createId(), strength: 0, canSplit: 'no' }]
+      denominations: [...prev.denominations, { id: createId(), strength: 0, canSplit: 'quarter' }]
     }));
   };
 
@@ -146,7 +149,8 @@ const App: React.FC = () => {
     let text = `Medication Taper Plan\n`;
     text += `Drug: ${drug.name || '(unnamed)'}\n`;
     text += `Start Dose: ${drug.currentDose}${drug.unit}\n`;
-    text += `Reduction: ${wean.reductionType === 'percentage' ? `${wean.reductionValue}%` : `${wean.reductionValue}${drug.unit}`} every ${wean.intervalDays} days\n\n`;
+    text += `Reduction: ${wean.reductionType === 'percentage' ? `${wean.reductionValue}%` : `${wean.reductionValue}${drug.unit}`} every ${wean.intervalDays} days\n`;
+    text += `Stop Dose: ${wean.minimumDoseThreshold}${drug.unit}\n\n`;
 
     text += `Date`.padEnd(dateColWidth) + `Dose`.padEnd(doseColWidth) + `For`.padEnd(durationColWidth) + `Instructions\n`;
     text += `-`.repeat(80) + `\n`;
@@ -169,6 +173,10 @@ const App: React.FC = () => {
         + describeDuration(step.durationDays).padEnd(durationColWidth)
         + `${instruction}\n`;
     });
+
+    if (schedule.endReason === 'truncated') {
+      text += `\n*** INCOMPLETE PLAN — the taper had not reached the stop dose when the schedule was cut off. ***\n`;
+    }
 
     text += `\n` + `-`.repeat(80) + `\n`;
     text += `Total Medication Required for Full Plan:\n`;
@@ -201,7 +209,8 @@ const App: React.FC = () => {
     window.setTimeout(() => setCopyState('idle'), 2500);
   };
 
-  const lastStep = hasSchedule ? schedule.steps[schedule.steps.length - 1] : null;
+  const heldSteps = schedule.steps.filter(step => !step.isStop);
+  const finalDose = heldSteps.length > 0 ? heldSteps[heldSteps.length - 1].actualDose : 0;
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100 font-sans transition-colors duration-200">
@@ -485,7 +494,7 @@ const App: React.FC = () => {
           ) : (
             <>
               {/* Summary Stats */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
                  <div className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col justify-center transition-colors duration-200">
                     <span className="text-slate-400 dark:text-slate-500 text-xs font-semibold uppercase">Total Duration</span>
                     <div className="flex items-baseline gap-1">
@@ -501,10 +510,27 @@ const App: React.FC = () => {
                     </div>
                  </div>
                  <div className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col justify-center transition-colors duration-200">
-                    <span className="text-slate-400 dark:text-slate-500 text-xs font-semibold uppercase">Est. End Date</span>
+                    <span className="text-slate-400 dark:text-slate-500 text-xs font-semibold uppercase">
+                      {schedule.endReason === 'truncated' ? 'Plan Cut Off' : 'Est. End Date'}
+                    </span>
                     <div className="flex items-baseline gap-1">
                       <span className="text-xl font-bold text-slate-800 dark:text-slate-100">
-                        {lastStep && formatISODate(lastStep.date, { month: 'short', day: 'numeric', year: 'numeric' })}
+                        {formatISODate(schedule.endDate, { month: 'short', day: 'numeric', year: 'numeric' })}
+                      </span>
+                    </div>
+                 </div>
+                 {/* The dose the patient steps off from is the clinically risky
+                     number, and it is not always the requested stop dose. */}
+                 <div className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col justify-center transition-colors duration-200">
+                    <span className="text-slate-400 dark:text-slate-500 text-xs font-semibold uppercase">
+                      {schedule.endReason === 'truncated' ? 'Lowest Dose Reached' : 'Ceases From'}
+                    </span>
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-2xl font-bold text-slate-800 dark:text-slate-100">
+                        {formatDose(finalDose, 3)}{drug.unit}
+                      </span>
+                      <span className="text-sm text-slate-500 dark:text-slate-400">
+                        ({formatDose((finalDose / schedule.startingDose) * 100, 1)}% of start)
                       </span>
                     </div>
                  </div>
@@ -515,8 +541,13 @@ const App: React.FC = () => {
                 steps={schedule.steps}
                 targetCurve={schedule.targetCurve}
                 unit={drug.unit}
+                startingDose={schedule.startingDose}
+                startDate={schedule.steps[0].date}
+                endDate={schedule.endDate}
                 isDarkMode={isDarkMode}
               />
+
+              <CalculationBreakdown drug={drug} wean={wean} schedule={schedule} />
 
               {/* EMR Friendly Text */}
               <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 p-6 transition-colors duration-200 print:hidden">
@@ -591,6 +622,11 @@ const App: React.FC = () => {
                                    <AlertCircle size={10} /> {formatDose(step.targetDose - step.actualDose)}{drug.unit} below target
                                  </span>
                                )}
+                               {!step.isStop && step.reductionPercent !== null && (
+                                 <span className={`text-[10px] mt-1 ${step.reductionPercent > 15 ? 'text-amber-500 font-semibold' : 'text-slate-400 dark:text-slate-500'}`}>
+                                   ↓ {formatDose(step.reductionFromPrevious ?? 0, 3)}{drug.unit} ({formatDose(step.reductionPercent, 1)}%) from previous dose
+                                 </span>
+                               )}
                             </div>
                           </td>
                           <td className="px-6 py-4">
@@ -603,6 +639,14 @@ const App: React.FC = () => {
                           </td>
                         </tr>
                       ))}
+                      {schedule.endReason === 'truncated' && (
+                        <tr className="bg-amber-50 dark:bg-amber-900/20">
+                          <td colSpan={4} className="px-6 py-4 text-sm text-amber-800 dark:text-amber-200">
+                            The taper had not reached the stop dose when the schedule was cut off, so this plan
+                            is incomplete and shows no cessation date.
+                          </td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </div>

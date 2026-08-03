@@ -51,8 +51,24 @@ describe('findBestTabletCombination', () => {
   });
 
   it('returns zero when nothing small enough can be made', () => {
-    expect(findBestTabletCombination(24, DEFAULTS)).toEqual({ actualDose: 0, tablets: {} });
-    expect(findBestTabletCombination(0.4, FINE)).toEqual({ actualDose: 0, tablets: {} });
+    expect(findBestTabletCombination(24, DEFAULTS)).toEqual({ actualDose: 0, tablets: {}, pieces: [] });
+    expect(findBestTabletCombination(0.4, FINE)).toEqual({ actualDose: 0, tablets: {}, pieces: [] });
+  });
+
+  it('reports the pieces that make up the dose, largest first', () => {
+    const { actualDose, pieces } = findBestTabletCombination(17.5, FINE);
+    expect(actualDose).toBe(17.5);
+    expect(pieces.reduce((sum, p) => sum + p.subtotal, 0)).toBeCloseTo(actualDose, 6);
+    for (let i = 1; i < pieces.length; i++) {
+      expect(pieces[i].strength).toBeLessThanOrEqual(pieces[i - 1].strength);
+    }
+  });
+
+  it('describes split pieces by their real strength, not the tablet strength', () => {
+    const { pieces } = findBestTabletCombination(2.5, [{ id: 'a', strength: 10, canSplit: 'quarter' }]);
+    expect(pieces).toEqual([
+      { denomId: 'a', strength: 2.5, tabletFraction: 0.25, pieceCount: 1, subtotal: 2.5 }
+    ]);
   });
 
   it('prefers whole tablets over splitting when both reach the dose', () => {
@@ -131,6 +147,63 @@ describe('generateSchedule', () => {
     const doses = result.steps.filter(s => !s.isStop).map(s => s.actualDose);
     expect(new Set(doses).size).toBe(doses.length);
     expect(doses).toEqual([50, 25]);
+  });
+
+  it('prescribes the stop dose itself before ceasing', () => {
+    // "Stop at 5mg" means 5mg is the last dose taken, not the dose below the
+    // last one taken. The old engine ceased from 10mg and said nothing.
+    const result = generateSchedule(
+      drug(FINE, { currentDose: 20 }),
+      wean({ reductionType: 'fixed', reductionValue: 5, intervalDays: 7, minimumDoseThreshold: 5 })
+    );
+    expect(result.steps.filter(s => !s.isStop).map(s => s.actualDose)).toEqual([20, 15, 10, 5]);
+    expect(result.endReason).toBe('reached-stop-dose');
+  });
+
+  it('does not cease from a dose above the requested stop dose without saying so', () => {
+    const result = generateSchedule(drug(DEFAULTS), wean({ minimumDoseThreshold: 0.5 }));
+    const held = result.steps.filter(s => !s.isStop);
+    const last = held[held.length - 1];
+    expect(last.actualDose).toBeGreaterThan(0.5);
+    expect(result.endReason).toBe('granularity-limited');
+    expect(result.warnings.join(' ')).toMatch(/ceases from 25mg/i);
+  });
+
+  it('flags a step that drops far more steeply than requested', () => {
+    // 50mg and 25mg tablets can only express a 50% drop, not the 10% asked for.
+    const result = generateSchedule(drug(DEFAULTS), wean());
+    expect(result.warnings.join(' ')).toMatch(/force a 50% drop/i);
+  });
+
+  it('does not flag drops that track the requested reduction', () => {
+    // 0.25mg pieces are fine enough to follow a 10% curve down to 10mg, so
+    // every realised drop lands within a whisker of the requested one.
+    const result = generateSchedule(
+      drug([{ id: '1', strength: 1, canSplit: 'quarter' }], { currentDose: 20 }),
+      wean({ reductionValue: 10, minimumDoseThreshold: 10 })
+    );
+    expect(result.warnings.join(' ')).not.toMatch(/drop/i);
+    result.steps
+      .filter(s => !s.isStop && s.reductionPercent !== null)
+      .forEach(s => expect(s.reductionPercent).toBeLessThan(15));
+  });
+
+  it('flags the tail of a taper, where a fixed piece size bites hardest', () => {
+    // The same 0.25mg granularity that tracks a 10% curve at 20mg cannot
+    // express one at 1mg — the Maudsley argument for liquids at the tail.
+    const result = generateSchedule(
+      drug([{ id: '1', strength: 1, canSplit: 'quarter' }], { currentDose: 20 }),
+      wean({ reductionValue: 10, minimumDoseThreshold: 0.25 })
+    );
+    expect(result.warnings.join(' ')).toMatch(/drop/i);
+  });
+
+  it('records the realised reduction against the previous prescribed dose', () => {
+    const result = generateSchedule(drug(DEFAULTS), wean());
+    const held = result.steps.filter(s => !s.isStop);
+    expect(held[0].reductionFromPrevious).toBeNull();
+    expect(held[1].reductionFromPrevious).toBe(25); // 50 -> 25
+    expect(held[1].reductionPercent).toBe(50);
   });
 
   it('reports duration from the collapsed steps', () => {
@@ -216,6 +289,18 @@ describe('generateSchedule', () => {
     expect(result.warnings.join(' ')).toMatch(/no smaller dose can be made/i);
   });
 
+  it('does not print a cessation step for a plan it had to truncate', () => {
+    // A 1% taper of 100mg in 0.001mg pieces cannot finish inside the iteration
+    // cap. Emitting "STOP" here would instruct cessation from ~0.66mg.
+    const result = generateSchedule(
+      drug([{ id: '1', strength: 0.001, canSplit: 'no' }], { currentDose: 100 }),
+      wean({ reductionValue: 1, intervalDays: 1, minimumDoseThreshold: 0 })
+    );
+    expect(result.endReason).toBe('truncated');
+    expect(result.steps.some(s => s.isStop)).toBe(false);
+    expect(result.warnings.join(' ')).toMatch(/incomplete/i);
+  });
+
   it.each([
     ['a cleared reduction field', wean({ reductionValue: 0 })],
     ['a negative reduction', wean({ reductionValue: -10 })],
@@ -258,6 +343,14 @@ describe('generateSchedule', () => {
     expect(result.steps.filter(s => !s.isStop).map(s => s.actualDose)).toEqual([20, 15, 10, 5]);
   });
 
+  it('reports the end date and total days independently of the stop step', () => {
+    const result = generateSchedule(drug(DEFAULTS), wean());
+    expect(result.totalDays).toBe(
+      result.steps.filter(s => !s.isStop).reduce((sum, s) => sum + s.durationDays, 0)
+    );
+    expect(result.endDate).toBe(result.steps[result.steps.length - 1].date);
+  });
+
   it('generates a whole plan quickly with a large formulary', () => {
     const many: Denomination[] = [10, 5, 2, 1, 25, 50, 20, 15].map((s, i) => ({
       id: String(i), strength: s, canSplit: 'quarter'
@@ -266,5 +359,56 @@ describe('generateSchedule', () => {
     generateSchedule(drug(many, { currentDose: 100 }), wean({ minimumDoseThreshold: 0.25 }));
     // The previous engine took ~18s for this shape, freezing the browser tab.
     expect(Date.now() - started).toBeLessThan(1000);
+  });
+});
+
+describe('derivation', () => {
+  it('has one entry per reduction interval, not per collapsed step', () => {
+    const result = generateSchedule(drug(DEFAULTS), wean());
+    expect(result.derivation).toHaveLength(result.targetCurve.length - 1);
+    expect(result.derivation.filter(d => d.startsNewStep)).toHaveLength(
+      result.steps.filter(s => !s.isStop).length
+    );
+  });
+
+  it('shows pieces that sum exactly to the prescribed dose', () => {
+    const result = generateSchedule(drug(FINE, { currentDose: 30 }), wean());
+    result.derivation.forEach(entry => {
+      const sum = entry.pieces.reduce((total, p) => total + p.subtotal, 0);
+      expect(sum).toBeCloseTo(entry.actualDose, 6);
+      expect(entry.actualFormula).toContain(String(entry.actualDose));
+    });
+  });
+
+  it('states a target that matches the closed-form curve it quotes', () => {
+    const result = generateSchedule(drug(FINE, { currentDose: 30 }), wean());
+    result.derivation.forEach(entry => {
+      const closedForm = 30 * Math.pow(0.9, entry.intervalIndex);
+      expect(entry.targetDose).toBeCloseTo(closedForm, 4);
+      expect(entry.targetFormula).toContain(String(entry.targetDose));
+    });
+  });
+
+  it('uses the fixed-reduction formula for a fixed taper', () => {
+    const result = generateSchedule(
+      drug(FINE, { currentDose: 20 }),
+      wean({ reductionType: 'fixed', reductionValue: 5, minimumDoseThreshold: 0 })
+    );
+    expect(result.derivation[2].targetFormula).toBe('20 - (2 x 5) = 10mg');
+  });
+
+  it('never claims a dose above the target it was derived from', () => {
+    const result = generateSchedule(drug(FINE, { currentDose: 30 }), wean());
+    result.derivation.forEach(entry => {
+      expect(entry.actualDose).toBeLessThanOrEqual(entry.targetDose);
+      expect(entry.shortfall).toBeGreaterThanOrEqual(0);
+    });
+  });
+
+  it('tracks the dose as a percentage of the starting dose', () => {
+    const result = generateSchedule(drug(DEFAULTS), wean());
+    expect(result.startingDose).toBe(50);
+    expect(result.derivation[0].percentOfStartingDose).toBe(100);
+    expect(result.derivation[result.derivation.length - 1].percentOfStartingDose).toBe(50);
   });
 });
