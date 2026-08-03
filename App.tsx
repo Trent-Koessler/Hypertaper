@@ -70,13 +70,15 @@ const describeDuration = (days: number): string => {
 
 const App: React.FC = () => {
   const [drug, setDrug] = useState<DrugConfig>({
-    name: 'Sertraline',
-    currentDose: 50,
+    name: 'Diazepam',
+    // 10mg is a common starting point for a benzodiazepine taper, and quartered
+    // 2mg tablets take it down to 0.5mg without a steeper-than-requested step.
+    currentDose: 10,
     unit: 'mg',
     startDate: todayISO(),
     denominations: [
-      { id: '1', strength: 50, canSplit: 'half' },
-      { id: '2', strength: 25, canSplit: 'no' }
+      { id: '1', strength: 5, canSplit: 'quarter' },
+      { id: '2', strength: 2, canSplit: 'quarter' }
     ]
   });
 
@@ -107,7 +109,7 @@ const App: React.FC = () => {
   const addDenom = () => {
     setDrug(prev => ({
       ...prev,
-      denominations: [...prev.denominations, { id: createId(), strength: 0, canSplit: 'no' }]
+      denominations: [...prev.denominations, { id: createId(), strength: 0, canSplit: 'quarter' }]
     }));
   };
 
