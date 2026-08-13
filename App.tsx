@@ -6,6 +6,7 @@ import { formatISODate, todayISO } from './services/dateUtils';
 import WeanChart from './components/WeanChart';
 import TabletVisualizer from './components/TabletVisualizer';
 import CalculationBreakdown from './components/CalculationBreakdown';
+import MathsExplainer from './components/MathsExplainer';
 
 const COMMON_DRUGS = [
   "Sertraline",
@@ -226,6 +227,7 @@ const App: React.FC = () => {
             </h1>
           </div>
           <div className="flex items-center gap-4">
+            <MathsExplainer />
             <button
               onClick={() => setIsDarkMode(!isDarkMode)}
               className="p-2 text-slate-500 hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400 transition-colors rounded-full hover:bg-slate-100 dark:hover:bg-slate-700"
