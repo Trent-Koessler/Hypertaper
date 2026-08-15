@@ -70,11 +70,19 @@ const MathsExplainer: React.FC = () => {
             </button>
           </div>
 
+          <p className="text-sm font-semibold text-slate-800 dark:text-slate-100 mb-2">
+            The dose the taper is aiming for at each step.
+          </p>
+
           <p className="font-mono text-sm text-blue-700 dark:text-blue-300 bg-slate-50 dark:bg-slate-900 rounded px-3 py-2 mb-3">
             target(n) = D₀ × (1 − r/100)<sup>n</sup>
           </p>
 
           <ul className="space-y-1 mb-3 text-sm text-slate-600 dark:text-slate-300">
+            <li>
+              <strong className="text-slate-800 dark:text-slate-100">target(n)</strong> — the dose
+              the curve asks for at step <em>n</em>, before tablets are taken into account
+            </li>
             <li>
               <strong className="text-slate-800 dark:text-slate-100">D₀</strong> — the starting dose
             </li>
