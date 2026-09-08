@@ -11,6 +11,11 @@ HyperTaper is a pure client-side web application designed to assist clinicians i
 - **Honest Warnings**: Flags when the available strengths are too coarse for the requested reduction, when a step drops far more steeply than asked for, or when the taper cannot reach the chosen stop dose.
 - **Show the Calculations**: Every plan can be expanded into an interval-by-interval derivation — the formula for each target, the pieces that make up each prescribed dose, the shortfall against the curve, and the realised reduction — so a clinician can check the arithmetic independently. Copyable as plain text.
 - **Configurable Chart**: Restrict the plotted date range, switch the x-axis between days, taper weeks and months, plot dose or percentage of the starting dose, and switch to a logarithmic y-axis (on which a constant-percentage taper is a straight line, making any departure from the intended curve obvious).
+- **Maudsley Reference Tables**: The three example diazepam taper schedules published in
+  *The Maudsley Deprescribing Guidelines* (2024) are included verbatim as a read-only
+  reference — receptor occupancy, AM/PM split, total daily dose and dose form for every
+  step. Any of them can seed the calculator's starting dose and tablet strengths, or be
+  overlaid on the chart to compare a generated plan against the published guidance.
 - **EMR Integration**: One-click copy of a fixed-width plain-text plan for pasting directly into clinical notes.
 - **Secure & Private**: 100% client-side logic. No patient data is sent to external servers!!!
 
@@ -55,6 +60,12 @@ npm run dev     # local dev server
 npm test        # unit tests for the tapering engine
 npm run build   # typecheck + production build
 ```
+
+The Maudsley reference tables are transcribed data, not computed output. They live in
+`services/maudsleyDiazepam.ts`, and `services/maudsleyDiazepam.test.ts` pins the
+structural invariants of the source tables (step numbering, AM + PM equalling the printed
+total, monotonic dose and occupancy, and each regimen honouring the occupancy step size it
+advertises) so a transcription error cannot pass silently.
 
 The tapering engine lives in `services/weaningLogic.ts` and is covered by
 `services/weaningLogic.test.ts`. It is the clinically load-bearing part of the

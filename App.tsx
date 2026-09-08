@@ -7,6 +7,13 @@ import WeanChart from './components/WeanChart';
 import TabletVisualizer from './components/TabletVisualizer';
 import CalculationBreakdown from './components/CalculationBreakdown';
 import MathsExplainer from './components/MathsExplainer';
+import MaudsleyReference from './components/MaudsleyReference';
+import {
+  MAUDSLEY_TABLET_STRENGTHS,
+  MaudsleyRegimen,
+  getMaudsleyRegimen,
+  maudsleyCurve
+} from './services/maudsleyDiazepam';
 
 const COMMON_DRUGS = [
   "Sertraline",
@@ -93,6 +100,8 @@ const App: React.FC = () => {
   const [isCustomDrug, setIsCustomDrug] = useState(false);
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const [isDarkMode, setIsDarkMode] = useState(readStoredTheme);
+  /** Published regimen drawn on the chart for comparison, by id, or null for none. */
+  const [overlaidRegimenId, setOverlaidRegimenId] = useState<string | null>(null);
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', isDarkMode);
@@ -106,6 +115,40 @@ const App: React.FC = () => {
   // Derived, not stored: a stale schedule can never outlive an invalid input.
   const schedule = useMemo(() => generateSchedule(drug, wean), [drug, wean]);
   const hasSchedule = schedule.steps.length > 0;
+
+  const referenceCurve = useMemo(() => {
+    const regimen = overlaidRegimenId ? getMaudsleyRegimen(overlaidRegimenId) : undefined;
+    if (!regimen) return null;
+    return {
+      name: `Maudsley ${regimen.title.toLowerCase()} taper`,
+      points: maudsleyCurve(regimen, wean.intervalDays)
+    };
+  }, [overlaidRegimenId, wean.intervalDays]);
+
+  /**
+   * Sets up the calculator to start where a published regimen starts, using the
+   * tablet strengths the guideline lists as available. The schedule itself is
+   * still generated from the user's own taper settings — the table is a
+   * reference, not a plan to be replayed.
+   */
+  const loadMaudsleyRegimen = (regimen: MaudsleyRegimen) => {
+    setIsCustomDrug(false);
+    setDrug(prev => ({
+      ...prev,
+      name: 'Diazepam',
+      unit: 'mg',
+      currentDose: regimen.steps[0].total,
+      denominations: MAUDSLEY_TABLET_STRENGTHS.map((strength, index) => ({
+        id: `maudsley-${index}`,
+        strength,
+        canSplit: 'quarter' as const
+      }))
+    }));
+  };
+
+  const toggleMaudsleyOverlay = (regimen: MaudsleyRegimen) => {
+    setOverlaidRegimenId(current => (current === regimen.id ? null : regimen.id));
+  };
 
   const addDenom = () => {
     setDrug(prev => ({
@@ -547,9 +590,16 @@ const App: React.FC = () => {
                 startDate={schedule.steps[0].date}
                 endDate={schedule.endDate}
                 isDarkMode={isDarkMode}
+                reference={referenceCurve}
               />
 
               <CalculationBreakdown drug={drug} wean={wean} schedule={schedule} />
+
+              <MaudsleyReference
+                onLoadRegimen={loadMaudsleyRegimen}
+                overlaidRegimenId={overlaidRegimenId}
+                onToggleOverlay={toggleMaudsleyOverlay}
+              />
 
               {/* EMR Friendly Text */}
               <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 p-6 transition-colors duration-200 print:hidden">
