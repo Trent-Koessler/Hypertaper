@@ -12,12 +12,18 @@ interface WeanChartProps {
   startDate: string;
   endDate: string;
   isDarkMode?: boolean;
+  /**
+   * A published reference regimen drawn alongside the plan for comparison.
+   * Its doses are the source's, sampled at the plan's own reduction interval.
+   */
+  reference?: { name: string; points: { dayIndex: number; dose: number }[] } | null;
 }
 
 interface ChartPoint {
   t: number;
   dose?: number;
   ideal?: number;
+  reference?: number;
 }
 
 type TickMode = 'auto' | 'day' | 'week' | 'month';
@@ -26,10 +32,20 @@ type YUnit = 'dose' | 'percent';
 
 const DAY_MS = 86_400_000;
 
+/** The value series a chart point can carry. */
+type SeriesKey = 'dose' | 'ideal' | 'reference';
+
 const timestamp = (iso: string): number | null => parseISODateLocal(iso)?.getTime() ?? null;
 
+/** A local-midnight timestamp back as `YYYY-MM-DD`, for the date inputs' bounds. */
+const toISODate = (t: number): string => {
+  const date = new Date(t);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+};
+
 /** Value of a step series at `t`: the last value set at or before it. */
-function carryForward(points: ChartPoint[], key: 'dose' | 'ideal', t: number): number | undefined {
+function carryForward(points: ChartPoint[], key: SeriesKey, t: number): number | undefined {
   let carried: number | undefined;
   for (const point of points) {
     if (point.t > t) break;
@@ -39,7 +55,7 @@ function carryForward(points: ChartPoint[], key: 'dose' | 'ideal', t: number): n
 }
 
 /** Value of a continuous series at `t`, interpolated between its samples. */
-function interpolate(points: ChartPoint[], key: 'dose' | 'ideal', t: number): number | undefined {
+function interpolate(points: ChartPoint[], key: SeriesKey, t: number): number | undefined {
   const known = points.filter(p => p[key] !== undefined);
   if (known.length === 0) return undefined;
   if (t <= known[0].t) return known[0][key];
@@ -102,13 +118,15 @@ const WeanChart: React.FC<WeanChartProps> = ({
   startingDose,
   startDate,
   endDate,
-  isDarkMode
+  isDarkMode,
+  reference
 }) => {
   const [tickMode, setTickMode] = useState<TickMode>('auto');
   const [yScale, setYScale] = useState<YScale>('linear');
   const [yUnit, setYUnit] = useState<YUnit>('dose');
   const [showPrescribed, setShowPrescribed] = useState(true);
   const [showIdeal, setShowIdeal] = useState(true);
+  const [showReference, setShowReference] = useState(true);
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
 
@@ -134,12 +152,29 @@ const WeanChart: React.FC<WeanChartProps> = ({
       const t = timestamp(entry.date);
       if (t !== null) pointAt(t).ideal = entry.dose;
     });
+    // The reference regimen is numbered by step, not dated, so it is anchored
+    // to the plan's start and laid out at the plan's own reduction interval.
+    const planStart = timestamp(startDate);
+    if (reference && planStart !== null) {
+      reference.points.forEach(point => {
+        pointAt(planStart + point.dayIndex * DAY_MS).reference = point.dose;
+      });
+    }
 
     return Array.from(byTime.values()).sort((a, b) => a.t - b.t);
-  }, [steps, targetCurve]);
+  }, [steps, targetCurve, reference, startDate]);
 
   const planFrom = timestamp(startDate) ?? allPoints[0]?.t ?? Date.now();
-  const planTo = timestamp(endDate) ?? allPoints[allPoints.length - 1]?.t ?? planFrom;
+  const planEnd = timestamp(endDate) ?? allPoints[allPoints.length - 1]?.t ?? planFrom;
+  // A reference regimen often runs well past the generated plan — the point of
+  // comparing them — so the default window has to stretch to cover it, or the
+  // overlay would be cut off at the plan's end without saying so.
+  const referenceEnd =
+    reference && reference.points.length > 0
+      ? planFrom + reference.points[reference.points.length - 1].dayIndex * DAY_MS
+      : planEnd;
+  const planTo = Math.max(planEnd, referenceEnd);
+  const axisMaxDate = toISODate(planTo);
 
   const windowFrom = (fromDate && timestamp(fromDate)) || planFrom;
   const windowTo = (toDate && timestamp(toDate)) || planTo;
@@ -157,15 +192,30 @@ const WeanChart: React.FC<WeanChartProps> = ({
     // making a long hold look like a gap. Carry it in at the window edge.
     const edges: ChartPoint[] = [];
     if (!inWindow.some(p => p.t === from)) {
-      edges.push({ t: from, dose: carryForward(allPoints, 'dose', from), ideal: interpolate(allPoints, 'ideal', from) });
+      edges.push({
+        t: from,
+        dose: carryForward(allPoints, 'dose', from),
+        ideal: interpolate(allPoints, 'ideal', from),
+        reference: carryForward(allPoints, 'reference', from)
+      });
     }
     if (!inWindow.some(p => p.t === to) && to > from) {
-      edges.push({ t: to, dose: carryForward(allPoints, 'dose', to), ideal: interpolate(allPoints, 'ideal', to) });
+      edges.push({
+        t: to,
+        dose: carryForward(allPoints, 'dose', to),
+        ideal: interpolate(allPoints, 'ideal', to),
+        reference: carryForward(allPoints, 'reference', to)
+      });
     }
 
     const scaled = [...edges, ...inWindow]
       .sort((a, b) => a.t - b.t)
-      .map(p => ({ t: p.t, dose: scaleValue(p.dose), ideal: scaleValue(p.ideal) }));
+      .map(p => ({
+        t: p.t,
+        dose: scaleValue(p.dose),
+        ideal: scaleValue(p.ideal),
+        reference: scaleValue(p.reference)
+      }));
 
     if (yScale !== 'log') return scaled;
 
@@ -174,12 +224,15 @@ const WeanChart: React.FC<WeanChartProps> = ({
     // hiding weeks of treatment, so hold the last dose out to that date
     // instead and say in the caption that the drop to zero is not drawn.
     let lastDose: number | undefined;
+    let lastReference: number | undefined;
     return scaled.map(p => {
       if (p.dose !== undefined && p.dose > 0) lastDose = p.dose;
+      if (p.reference !== undefined && p.reference > 0) lastReference = p.reference;
       return {
         t: p.t,
         dose: p.dose === 0 ? lastDose : p.dose,
-        ideal: p.ideal === 0 ? undefined : p.ideal
+        ideal: p.ideal === 0 ? undefined : p.ideal,
+        reference: p.reference === 0 ? lastReference : p.reference
       };
     });
   }, [allPoints, from, to, yScale, yUnit, startingDose]);
@@ -189,7 +242,8 @@ const WeanChart: React.FC<WeanChartProps> = ({
   const axisColor = '#94a3b8';
   const yLabel = yUnit === 'percent' ? '% of start' : unit;
   const valueSuffix = yUnit === 'percent' ? '% of start' : unit;
-  const hasZeroDose = yScale === 'log' && allPoints.some(p => p.dose === 0);
+  const hasZeroDose =
+    yScale === 'log' && allPoints.some(p => p.dose === 0 || (p.reference !== undefined && p.reference === 0));
 
   const formatTick = (value: number): string => {
     const date = new Date(value);
@@ -238,7 +292,7 @@ const WeanChart: React.FC<WeanChartProps> = ({
             type="date"
             value={fromDate}
             min={startDate}
-            max={endDate}
+            max={axisMaxDate}
             onChange={e => setFromDate(e.target.value)}
             className={controlClass}
           />
@@ -249,7 +303,7 @@ const WeanChart: React.FC<WeanChartProps> = ({
             type="date"
             value={toDate}
             min={startDate}
-            max={endDate}
+            max={axisMaxDate}
             onChange={e => setToDate(e.target.value)}
             className={controlClass}
           />
@@ -286,6 +340,12 @@ const WeanChart: React.FC<WeanChartProps> = ({
             <input type="checkbox" checked={showIdeal} onChange={e => setShowIdeal(e.target.checked)} />
             Ideal target
           </label>
+          {reference && (
+            <label className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300">
+              <input type="checkbox" checked={showReference} onChange={e => setShowReference(e.target.checked)} />
+              {reference.name}
+            </label>
+          )}
         </div>
       </div>
 
@@ -294,6 +354,14 @@ const WeanChart: React.FC<WeanChartProps> = ({
           On a log axis a constant-percentage taper is a straight line, which makes any deviation from the
           intended curve obvious.
           {hasZeroDose && ' Zero cannot be plotted on a log axis, so the final dose is drawn holding to the cessation date rather than dropping to it.'}
+        </p>
+      )}
+
+      {reference && showReference && (
+        <p className="text-[11px] text-slate-400 dark:text-slate-500 mb-2">
+          {reference.name} is numbered by step, not by date. It is drawn from the plan&apos;s start date at the
+          plan&apos;s own reduction interval, so the two curves share a cadence; the guideline itself specifies
+          only that reductions are made every 1&ndash;4 weeks.
         </p>
       )}
 
@@ -360,6 +428,21 @@ const WeanChart: React.FC<WeanChartProps> = ({
                 strokeDasharray="5 5"
                 dot={false}
                 name="Ideal target"
+                connectNulls
+                isAnimationActive={false}
+              />
+            )}
+            {reference && showReference && (
+              <Line
+                // Like the plan, a published regimen holds each dose for a whole
+                // interval before dropping, so it is stepped rather than smoothed.
+                type="stepAfter"
+                dataKey="reference"
+                stroke="#a855f7"
+                strokeWidth={2}
+                strokeDasharray="2 3"
+                dot={false}
+                name={reference.name}
                 connectNulls
                 isAnimationActive={false}
               />
