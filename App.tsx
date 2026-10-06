@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Pill, Calculator, Calendar, Activity, Info, AlertCircle, AlertTriangle, Plus, Trash2, Printer, Scissors, Sun, Moon, Copy, Check } from 'lucide-react';
-import { DrugConfig, WeanConfig, Denomination, ScheduleStep } from './types';
+import { Pill, Calculator, Calendar, Activity, Info, AlertCircle, AlertTriangle, Plus, Trash2, Printer, Scissors, Sun, Moon, Copy, Check, Droplet } from 'lucide-react';
+import { DrugConfig, WeanConfig, Denomination, ScheduleStep, LiquidConfig } from './types';
 import { generateSchedule } from './services/weaningLogic';
 import { formatISODate, todayISO } from './services/dateUtils';
 import WeanChart from './components/WeanChart';
@@ -52,14 +52,17 @@ const formatCount = (count: number): string => count.toFixed(count % 1 === 0 ? 0
 const formatDose = (value: number, decimals = 2): string =>
   String(parseFloat(value.toFixed(decimals)));
 
-/** "2x 50mg, 1x 25mg" for a step's tablets, optionally scaled over the whole step. */
+/** "2x 50mg, 1x 25mg" (or "1.8mL of 1mg/mL liquid") for a step, optionally scaled over the whole step. */
 const describeTablets = (
   step: ScheduleStep,
   denominations: Denomination[],
   unit: string,
-  multiplier = 1
+  multiplier = 1,
+  liquid?: LiquidConfig
 ): string =>
-  Object.entries(step.tablets)
+  step.liquidMl !== undefined && liquid
+    ? `${formatDose(step.liquidMl * multiplier, 3)}mL of ${formatDose(liquid.concentration, 3)}${unit}/mL liquid`
+    : Object.entries(step.tablets)
     .filter(([, count]) => count > 0)
     .map(([id, count]) => {
       const denom = denominations.find(d => d.id === id);
@@ -87,7 +90,16 @@ const App: React.FC = () => {
     denominations: [
       { id: '1', strength: 5, canSplit: 'quarter' },
       { id: '2', strength: 2, canSplit: 'quarter' }
-    ]
+    ],
+    // Off by default. In Australia an oral diazepam liquid is usually compounded,
+    // so the concentration is whatever the pharmacy makes up.
+    liquid: {
+      enabled: false,
+      mode: 'below',
+      switchBelowDose: 2,
+      concentration: 1,
+      measureIncrementMl: 0.1
+    }
   });
 
   const [wean, setWean] = useState<WeanConfig>({
@@ -168,6 +180,14 @@ const App: React.FC = () => {
     }));
   };
 
+  const updateLiquid = <K extends keyof LiquidConfig>(field: K, value: LiquidConfig[K]) => {
+    setDrug(prev => prev.liquid ? { ...prev, liquid: { ...prev.liquid, [field]: value } } : prev);
+  };
+
+  const liquid = drug.liquid;
+  const liquidOn = !!liquid?.enabled;
+  const liquidOnly = liquidOn && liquid!.mode === 'whole';
+
   const handleDrugChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const val = e.target.value;
     if (val === 'Other') {
@@ -194,7 +214,12 @@ const App: React.FC = () => {
     text += `Drug: ${drug.name || '(unnamed)'}\n`;
     text += `Start Dose: ${drug.currentDose}${drug.unit}\n`;
     text += `Reduction: ${wean.reductionType === 'percentage' ? `${wean.reductionValue}%` : `${wean.reductionValue}${drug.unit}`} every ${wean.intervalDays} days\n`;
-    text += `Stop Dose: ${wean.minimumDoseThreshold}${drug.unit}\n\n`;
+    text += `Stop Dose: ${wean.minimumDoseThreshold}${drug.unit}\n`;
+    if (liquidOn) {
+      text += `Liquid: ${liquid!.concentration}${drug.unit}/mL, measured to ${liquid!.measureIncrementMl}mL, `
+        + (liquidOnly ? `for the whole taper\n` : `for doses below ${liquid!.switchBelowDose}${drug.unit}\n`);
+    }
+    text += `\n`;
 
     text += `Date`.padEnd(dateColWidth) + `Dose`.padEnd(doseColWidth) + `For`.padEnd(durationColWidth) + `Instructions\n`;
     text += `-`.repeat(80) + `\n`;
@@ -208,8 +233,8 @@ const App: React.FC = () => {
         return;
       }
 
-      const daily = describeTablets(step, drug.denominations, drug.unit);
-      const stepTotal = describeTablets(step, drug.denominations, drug.unit, step.durationDays);
+      const daily = describeTablets(step, drug.denominations, drug.unit, 1, liquid);
+      const stepTotal = describeTablets(step, drug.denominations, drug.unit, step.durationDays, liquid);
       const instruction = `${daily} daily (step total: ${stepTotal})`;
 
       text += dateStr.padEnd(dateColWidth)
@@ -230,6 +255,9 @@ const App: React.FC = () => {
         text += `- ${formatCount(count)}x ${denom.strength}${drug.unit} tablets\n`;
       }
     });
+    if (schedule.totalLiquidMl > 0 && liquid) {
+      text += `- ${formatDose(schedule.totalLiquidMl, 2)}mL of ${liquid.concentration}${drug.unit}/mL liquid\n`;
+    }
 
     if (schedule.warnings.length > 0) {
       text += `\nNotes:\n`;
@@ -239,7 +267,7 @@ const App: React.FC = () => {
     }
 
     return text;
-  }, [schedule, drug, wean, hasSchedule]);
+  }, [schedule, drug, wean, hasSchedule, liquid, liquidOn, liquidOnly]);
 
   const copyEmrText = async () => {
     try {
@@ -384,7 +412,12 @@ const App: React.FC = () => {
                     <Plus size={16} />
                   </button>
                 </div>
-                <div className="space-y-3">
+                {liquidOnly && (
+                  <p className="text-xs text-slate-400 dark:text-slate-500 mb-2">
+                    Not used — the whole taper is given as liquid.
+                  </p>
+                )}
+                <div className={`space-y-3 ${liquidOnly ? 'opacity-50' : ''}`}>
                   {drug.denominations.map(denom => (
                     <div key={denom.id} className="flex flex-col gap-2 bg-slate-50 dark:bg-slate-700/50 p-2 rounded-lg border border-slate-200 dark:border-slate-600">
                       <div className="flex gap-2 items-center">
@@ -426,6 +459,99 @@ const App: React.FC = () => {
                   ))}
                 </div>
               </div>
+
+              {/* Liquid formulation */}
+              {liquid && (
+                <div className="pt-4 border-t border-slate-200 dark:border-slate-700">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={liquid.enabled}
+                      onChange={e => updateLiquid('enabled', e.target.checked)}
+                      className="w-4 h-4 accent-blue-600"
+                    />
+                    <Droplet size={14} className="text-sky-500" />
+                    <span className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Use a liquid formulation</span>
+                  </label>
+
+                  {liquid.enabled && (
+                    <div className="mt-3 space-y-3 bg-sky-50/60 dark:bg-sky-900/10 p-3 rounded-lg border border-sky-100 dark:border-sky-900/40">
+                      <div className="flex bg-white dark:bg-slate-700 p-1 rounded-lg border border-slate-200 dark:border-slate-600" role="radiogroup" aria-label="When to use the liquid">
+                        {([['below', 'Below a dose'], ['whole', 'Whole taper']] as const).map(([mode, label]) => (
+                          <button
+                            key={mode}
+                            role="radio"
+                            aria-checked={liquid.mode === mode}
+                            onClick={() => updateLiquid('mode', mode)}
+                            className={`flex-1 py-1 text-xs font-medium rounded-md transition-all ${liquid.mode === mode ? 'bg-sky-100 dark:bg-slate-800 text-sky-700 dark:text-sky-300 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+
+                      {liquid.mode === 'below' && (
+                        <div>
+                          <label htmlFor="liquid-switch" className="block text-xs font-medium text-slate-500 dark:text-slate-400 uppercase mb-1">Switch to liquid below</label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              id="liquid-switch"
+                              type="number"
+                              min="0"
+                              step="any"
+                              value={liquid.switchBelowDose}
+                              onChange={e => updateLiquid('switchBelowDose', Number(e.target.value))}
+                              className="w-full px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded text-sm bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-100"
+                            />
+                            <span className="text-sm text-slate-400 w-10">{drug.unit}</span>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label htmlFor="liquid-concentration" className="block text-xs font-medium text-slate-500 dark:text-slate-400 uppercase mb-1">Strength</label>
+                          <div className="flex items-center gap-1">
+                            <input
+                              id="liquid-concentration"
+                              type="number"
+                              min="0"
+                              step="any"
+                              value={liquid.concentration}
+                              onChange={e => updateLiquid('concentration', Number(e.target.value))}
+                              className="w-full px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded text-sm bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-100"
+                            />
+                            <span className="text-xs text-slate-400 whitespace-nowrap">{drug.unit}/mL</span>
+                          </div>
+                        </div>
+                        <div>
+                          <label htmlFor="liquid-increment" className="block text-xs font-medium text-slate-500 dark:text-slate-400 uppercase mb-1">Measure to</label>
+                          <div className="flex items-center gap-1">
+                            <input
+                              id="liquid-increment"
+                              type="number"
+                              min="0"
+                              step="any"
+                              value={liquid.measureIncrementMl}
+                              onChange={e => updateLiquid('measureIncrementMl', Number(e.target.value))}
+                              className="w-full px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded text-sm bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-100"
+                            />
+                            <span className="text-xs text-slate-400">mL</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <p className="text-xs text-slate-500 dark:text-slate-400 flex items-start gap-1">
+                        <Info size={14} className="mt-0.5 flex-shrink-0" />
+                        <span>
+                          Smallest dose change: {formatDose(liquid.concentration * liquid.measureIncrementMl, 4)}{drug.unit}.
+                          Check the strength with the dispensing pharmacy — in Australia an oral liquid is often compounded.
+                        </span>
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
@@ -640,7 +766,7 @@ const App: React.FC = () => {
                         <th scope="col" className="px-6 py-3">Date</th>
                         <th scope="col" className="px-6 py-3">Step</th>
                         <th scope="col" className="px-6 py-3">Target vs Actual</th>
-                        <th scope="col" className="px-6 py-3">Tablets Required (Daily)</th>
+                        <th scope="col" className="px-6 py-3">{liquidOn ? 'Tablets / Liquid (Daily)' : 'Tablets Required (Daily)'}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
@@ -682,10 +808,16 @@ const App: React.FC = () => {
                             </div>
                           </td>
                           <td className="px-6 py-4">
-                            <TabletVisualizer counts={step.tablets} denominations={drug.denominations} unit={drug.unit} />
+                            <TabletVisualizer
+                              counts={step.tablets}
+                              denominations={drug.denominations}
+                              unit={drug.unit}
+                              liquidMl={step.liquidMl}
+                              concentration={liquid?.concentration}
+                            />
                             {!step.isStop && (
                               <div className="mt-2 text-[11px] text-slate-500 dark:text-slate-400 border-t border-slate-100 dark:border-slate-700/50 pt-2 font-medium">
-                                Step Total: {describeTablets(step, drug.denominations, drug.unit, step.durationDays)}
+                                Step Total: {describeTablets(step, drug.denominations, drug.unit, step.durationDays, liquid)}
                               </div>
                             )}
                           </td>
@@ -721,6 +853,16 @@ const App: React.FC = () => {
                         </div>
                       );
                     })}
+                    {schedule.totalLiquidMl > 0 && liquid && (
+                      <div className="bg-white dark:bg-slate-800 px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-600 shadow-sm flex items-center gap-3">
+                        <div className="bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-300 font-bold px-2 py-1 rounded text-xs flex items-center gap-1">
+                          <Droplet size={12} /> {formatDose(liquid.concentration, 3)}{drug.unit}/mL
+                        </div>
+                        <div className="text-slate-600 dark:text-slate-300 font-medium">
+                          {formatDose(schedule.totalLiquidMl, 2)} <span className="text-xs text-slate-400 font-normal">mL</span>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

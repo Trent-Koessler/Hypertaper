@@ -24,6 +24,8 @@ const CalculationBreakdown: React.FC<CalculationBreakdownProps> = ({ drug, wean,
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
 
   const { unit } = drug;
+  const liquid = drug.liquid?.enabled ? drug.liquid : undefined;
+  const liquidIncrement = liquid ? liquid.concentration * liquid.measureIncrementMl : 0;
   const intervalDays = Math.max(1, Math.round(wean.intervalDays || 1));
 
   const methodLines = useMemo(() => {
@@ -33,12 +35,12 @@ const CalculationBreakdown: React.FC<CalculationBreakdownProps> = ({ drug, wean,
 
     return [
       `1. Ideal curve. Interval n falls on day n x ${intervalDays}, and asks for ${curve}. Each target is computed from the original dose, not from the previously prescribed one, so tablet rounding at one step never compounds into the rest of the curve.`,
-      `2. Achievable dose. For each target, the engine searches every combination of the available pieces and takes the largest total that does not exceed the target. It never rounds up, so no step can prescribe more than the curve asks for.`,
+      `2. Achievable dose. For each target, the engine searches every combination of the available pieces and takes the largest total that does not exceed the target. It never rounds up, so no step can prescribe more than the curve asks for.${liquid ? ` ${liquid.mode === 'whole' ? 'Every target' : `A target below ${num(liquid.switchBelowDose)}${unit}`} is given as liquid instead: the largest whole number of ${num(liquid.measureIncrementMl)}mL measures (${num(liquidIncrement)}${unit} each at ${num(liquid.concentration)}${unit}/mL) that does not exceed the target. If changing formulation would raise the dose above the previous step, the previous dose is held instead.` : ''}`,
       `3. Holding. When two consecutive intervals resolve to the same achievable dose, they are merged into one held step. The dose is held until the curve falls far enough to justify the next achievable dose down.`,
       `4. Stopping. Intervals are generated while target(n) is at or above the stop dose of ${num(wean.minimumDoseThreshold)}${unit}, so the stop dose itself is prescribed before cessation.`,
       `5. Preference. Among combinations that reach the same dose, the engine prefers the fewest pieces, and then the fewest cut tablets.`
     ];
-  }, [wean, schedule.startingDose, intervalDays, unit]);
+  }, [wean, schedule.startingDose, intervalDays, unit, liquid, liquidIncrement]);
 
   const totalsRows = useMemo(
     () =>
@@ -54,6 +56,14 @@ const CalculationBreakdown: React.FC<CalculationBreakdownProps> = ({ drug, wean,
         .filter((row): row is { strength: number; terms: string[]; total: number } => row !== null)
         .sort((a, b) => b.strength - a.strength),
     [schedule.totalTablets, schedule.steps, drug.denominations]
+  );
+
+  const liquidTerms = useMemo(
+    () =>
+      schedule.steps
+        .filter(step => !step.isStop && step.liquidMl !== undefined)
+        .map(step => `(${num(step.liquidMl!)}mL x ${step.durationDays}d)`),
+    [schedule.steps]
   );
 
   const plainText = useMemo(() => {
@@ -79,6 +89,11 @@ const CalculationBreakdown: React.FC<CalculationBreakdownProps> = ({ drug, wean,
             : `whole ${num(d.strength)}`;
         lines.push(`    ${num(d.strength)}${unit} tablet -> ${splits} (${unit})`);
       });
+    if (liquid) {
+      lines.push(
+        `  Liquid: ${num(liquid.concentration)}${unit}/mL, measured to ${num(liquid.measureIncrementMl)}mL (${num(liquidIncrement)}${unit}), ${liquid.mode === 'whole' ? 'for the whole taper' : `for targets below ${num(liquid.switchBelowDose)}${unit}`}`
+      );
+    }
     lines.push('');
     lines.push('METHOD');
     methodLines.forEach(line => lines.push(`  ${line}`));
@@ -107,6 +122,7 @@ const CalculationBreakdown: React.FC<CalculationBreakdownProps> = ({ drug, wean,
     totalsRows.forEach(row => {
       lines.push(`  ${num(row.strength)}${unit}: ${row.terms.join(' + ')} = ${num(row.total)} tablets`);
     });
+    if (schedule.totalLiquidMl > 0) lines.push(`  Liquid: ${liquidTerms.join(' + ')} = ${num(schedule.totalLiquidMl)}mL`);
     lines.push('');
     lines.push('DURATION');
     lines.push(
@@ -124,7 +140,7 @@ const CalculationBreakdown: React.FC<CalculationBreakdownProps> = ({ drug, wean,
       schedule.warnings.forEach(w => lines.push(`  - ${w}`));
     }
     return lines.join('\n');
-  }, [drug, wean, schedule, unit, intervalDays, methodLines, totalsRows]);
+  }, [drug, wean, schedule, unit, intervalDays, methodLines, totalsRows, liquid, liquidIncrement, liquidTerms]);
 
   const copy = async () => {
     try {
@@ -269,6 +285,11 @@ const CalculationBreakdown: React.FC<CalculationBreakdownProps> = ({ drug, wean,
                   {num(row.strength)}{unit}: {row.terms.join(' + ')} = <strong>{num(row.total)}</strong> tablets
                 </li>
               ))}
+              {schedule.totalLiquidMl > 0 && (
+                <li>
+                  Liquid: {liquidTerms.join(' + ')} = <strong>{num(schedule.totalLiquidMl)}</strong> mL
+                </li>
+              )}
             </ul>
           </section>
 

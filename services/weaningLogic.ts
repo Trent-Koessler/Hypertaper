@@ -6,7 +6,8 @@ import {
   ScheduleEndReason,
   Denomination,
   DerivationEntry,
-  DosePiece
+  DosePiece,
+  LiquidConfig
 } from '../types';
 import { addDaysISO, isValidISODate, todayISO } from './dateUtils';
 
@@ -88,6 +89,8 @@ export interface TabletCombination {
   tablets: { [id: string]: number };
   /** The dose broken into the pieces the patient physically takes. */
   pieces: DosePiece[];
+  /** Daily volume in mL when the dose is given as liquid instead of tablets. */
+  liquidMl?: number;
 }
 
 const EMPTY_COMBINATION: TabletCombination = { actualDose: 0, tablets: {}, pieces: [] };
@@ -185,8 +188,50 @@ export function findBestTabletCombination(
   };
 }
 
+/** The smallest dose the liquid can deliver: one measuring increment. */
+export function liquidDoseIncrement(liquid: LiquidConfig): number {
+  return liquid.concentration * liquid.measureIncrementMl;
+}
+
+/** Whether a step aiming at `targetDose` is given as liquid rather than tablets. */
+export function usesLiquid(liquid: LiquidConfig | undefined, targetDose: number): boolean {
+  if (!liquid?.enabled) return false;
+  return liquid.mode === 'whole' || targetDose < liquid.switchBelowDose - EPSILON;
+}
+
+/**
+ * The largest liquid dose that is a whole number of measuring increments and
+ * does not exceed the target. Like the tablet search, it never rounds up.
+ */
+export function findLiquidDose(targetDose: number, liquid: LiquidConfig): TabletCombination {
+  const increment = liquidDoseIncrement(liquid);
+  if (!Number.isFinite(targetDose) || targetDose <= 0 || !(increment > 0)) return { ...EMPTY_COMBINATION };
+
+  // The small tolerance absorbs floating-point error (1.8 / 0.1 = 17.999...),
+  // not a real rounding up: it is far below any measurable volume.
+  const increments = Math.floor(targetDose / increment + 1e-9);
+  if (increments <= 0) return { ...EMPTY_COMBINATION };
+
+  const liquidMl = roundDose(increments * liquid.measureIncrementMl);
+  return {
+    actualDose: roundDose(liquidMl * liquid.concentration),
+    tablets: {},
+    pieces: [],
+    liquidMl
+  };
+}
+
 /** "2 x 25mg + 1 x half of 10mg (5mg) = 55mg" — the arithmetic behind a dose. */
-function describePieces(pieces: DosePiece[], actualDose: number, unit: string): string {
+function describePieces(
+  pieces: DosePiece[],
+  actualDose: number,
+  unit: string,
+  liquidMl?: number,
+  liquid?: LiquidConfig
+): string {
+  if (liquidMl !== undefined && liquid) {
+    return `${num(liquidMl)}mL x ${num(liquid.concentration)}${unit}/mL = ${num(actualDose)}${unit}`;
+  }
   if (pieces.length === 0) return `0${unit}`;
   const terms = pieces.map(p => {
     const fraction = FRACTION_NAMES[p.tabletFraction];
@@ -204,6 +249,7 @@ function emptyResult(warnings: string[], startDate: string, startingDose: number
     targetCurve: [],
     derivation: [],
     totalTablets: {},
+    totalLiquidMl: 0,
     startingDose,
     totalDays: 0,
     durationWeeks: 0,
@@ -216,8 +262,26 @@ function emptyResult(warnings: string[], startDate: string, startingDose: number
 
 function validate(drug: DrugConfig, wean: WeanConfig, warnings: string[]): boolean {
   let usable = true;
+  const liquid = drug.liquid?.enabled ? drug.liquid : undefined;
 
-  if (buildPieces(drug.denominations).length === 0) {
+  if (liquid) {
+    if (!Number.isFinite(liquid.concentration) || liquid.concentration <= 0) {
+      warnings.push(`Enter a liquid concentration greater than zero (${drug.unit}/mL).`);
+      usable = false;
+    }
+    if (!Number.isFinite(liquid.measureIncrementMl) || liquid.measureIncrementMl <= 0) {
+      warnings.push('Enter the smallest liquid volume that can be measured, greater than zero (mL).');
+      usable = false;
+    }
+    if (liquid.mode === 'below' && (!Number.isFinite(liquid.switchBelowDose) || liquid.switchBelowDose <= 0)) {
+      warnings.push('Enter the dose below which the taper switches to liquid, greater than zero.');
+      usable = false;
+    }
+  }
+
+  // A liquid-only taper needs no tablets; any taper that starts on tablets does.
+  const tabletsNeeded = !(liquid && liquid.mode === 'whole');
+  if (tabletsNeeded && buildPieces(drug.denominations).length === 0) {
     warnings.push('Add at least one tablet strength greater than zero to generate a schedule.');
     usable = false;
   }
@@ -291,7 +355,17 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
     const target = targetAtInterval(startingDose, wean, iteration);
     if (target <= EPSILON || target < threshold - EPSILON) break;
 
-    const combination = findBestTabletCombination(target, drug.denominations);
+    let combination = usesLiquid(drug.liquid, target)
+      ? findLiquidDose(target, drug.liquid!)
+      : findBestTabletCombination(target, drug.denominations);
+
+    // Changing formulation can land above the previous dose: tablets may have
+    // fallen well short of an earlier target that the finer liquid now tracks
+    // closely. A taper must never step up, so hold the previous dose instead.
+    const previousHold = holds[holds.length - 1];
+    if (previousHold && combination.actualDose > previousHold.combination.actualDose + EPSILON) {
+      combination = previousHold.combination;
+    }
 
     // No combination of the available tablets can reach the target without
     // exceeding it: the taper is finished, whatever the arithmetic target says.
@@ -331,7 +405,7 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
 
   holds.forEach((hold, index) => {
     const date = addDaysISO(startDate, index * intervalDays);
-    const { actualDose, tablets, pieces } = hold.combination;
+    const { actualDose, tablets, pieces, liquidMl } = hold.combination;
     targetCurve.push({ date, dose: hold.target });
 
     const previous = steps[steps.length - 1];
@@ -350,7 +424,7 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
       targetDose: hold.target,
       targetFormula: targetFormula(startingDose, wean, index, hold.target, unit),
       actualDose,
-      actualFormula: describePieces(pieces, actualDose, unit),
+      actualFormula: describePieces(pieces, actualDose, unit, liquidMl, drug.liquid),
       pieces,
       shortfall: roundDose(hold.target - actualDose),
       startsNewStep,
@@ -369,6 +443,7 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
         actualDose,
         tablets,
         pieces,
+        ...(liquidMl !== undefined ? { liquidMl } : {}),
         reductionFromPrevious,
         reductionPercent,
         isStop: false
@@ -380,10 +455,12 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
     dayIndex += intervalDays;
   });
 
+  let totalLiquidMl = 0;
   steps.forEach(step => {
     Object.entries(step.tablets).forEach(([id, count]) => {
       totalTablets[id] = roundDose((totalTablets[id] || 0) + count * step.durationDays);
     });
+    if (step.liquidMl !== undefined) totalLiquidMl = roundDose(totalLiquidMl + step.liquidMl * step.durationDays);
   });
 
   const endDate = addDaysISO(startDate, dayIndex);
@@ -412,7 +489,11 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
   targetCurve.push({ date: endDate, dose: roundDose(Math.max(0, finalTarget)) });
 
   // 3. Warn when the available tablets cannot express the requested curve.
-  const smallestPiece = Math.min(...buildPieces(drug.denominations).map(p => p.strength));
+  // The first reduction is made in whichever form the plan starts on.
+  const startsOnLiquid = usesLiquid(drug.liquid, startingDose);
+  const smallestPiece = startsOnLiquid
+    ? liquidDoseIncrement(drug.liquid!)
+    : Math.min(...buildPieces(drug.denominations).map(p => p.strength));
   if (steps[0].actualDose < startingDose - EPSILON) {
     warnings.push(
       `A dose of ${num(startingDose)}${unit} cannot be made from the available strengths; the plan starts at ${num(steps[0].actualDose)}${unit}.`
@@ -423,7 +504,7 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
     : wean.reductionValue;
   if (smallestPiece > firstReduction) {
     warnings.push(
-      `The smallest available piece is ${num(smallestPiece)}${unit}, which is larger than the requested reduction of ${num(firstReduction)}${unit}. The taper cannot follow the requested curve — add a smaller strength, allow splitting, or use a liquid formulation.`
+      `The smallest ${startsOnLiquid ? 'measurable liquid dose' : 'available piece'} is ${num(smallestPiece)}${unit}, which is larger than the requested reduction of ${num(firstReduction)}${unit}. The taper cannot follow the requested curve — ${startsOnLiquid ? 'measure a smaller volume or use a more dilute liquid' : 'add a smaller strength, allow splitting, or use a liquid formulation'}.`
     );
   }
 
@@ -444,7 +525,7 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
   if (worstDrop) {
     const from = roundDose(worstDrop.actualDose + (worstDrop.reductionFromPrevious ?? 0));
     warnings.push(
-      `The available strengths force a ${num(worstDrop.reductionPercent!, 1)}% drop on ${worstDrop.date} (${num(from)}${unit} to ${num(worstDrop.actualDose)}${unit}), which is steeper than the requested reduction. Add a smaller strength, allow splitting, or lengthen the interval so the patient holds each dose for longer.`
+      `The available ${worstDrop.liquidMl !== undefined ? 'liquid measure forces' : 'strengths force'} a ${num(worstDrop.reductionPercent!, 1)}% drop on ${worstDrop.date} (${num(from)}${unit} to ${num(worstDrop.actualDose)}${unit}), which is steeper than the requested reduction. ${worstDrop.liquidMl !== undefined ? 'Measure a smaller volume, use a more dilute liquid,' : 'Add a smaller strength, allow splitting,'} or lengthen the interval so the patient holds each dose for longer.`
     );
   }
 
@@ -459,6 +540,7 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
     targetCurve,
     derivation,
     totalTablets,
+    totalLiquidMl,
     startingDose,
     totalDays: dayIndex,
     durationWeeks: Math.ceil(dayIndex / 7),

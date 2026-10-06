@@ -8,6 +8,11 @@ HyperTaper is a pure client-side web application designed to assist clinicians i
 - **Precise Tapering Algorithms**: Supports both fixed-dose and hyperbolic (percentage-based) reductions.
 - **Tablet Splitting Logic**: Automatically calculates fractional pill requirements based on available denominations and safe splitting practices.
 - **Never Overshoots**: Each step uses the largest dose the available tablets can actually make *without exceeding* the taper target, and holds it until the target falls to the next achievable dose.
+- **Liquid Formulations**: Optionally give the whole taper, or just the doses below a chosen
+  level, as an oral liquid. Enter the concentration (e.g. 1mg/mL) and the smallest volume that
+  can be measured (e.g. 0.1mL); each liquid dose is rounded *down* to whole measures. This keeps
+  the low-dose tail gentle where quartered tablets would force a large final drop, and the
+  plan never steps up when it switches from tablets to liquid.
 - **Honest Warnings**: Flags when the available strengths are too coarse for the requested reduction, when a step drops far more steeply than asked for, or when the taper cannot reach the chosen stop dose.
 - **Show the Calculations**: Every plan can be expanded into an interval-by-interval derivation — the formula for each target, the pieces that make up each prescribed dose, the shortfall against the curve, and the realised reduction — so a clinician can check the arithmetic independently. Copyable as plain text.
 - **Configurable Chart**: Restrict the plotted date range, switch the x-axis between days, taper weeks and months, plot dose or percentage of the starting dose, and switch to a logarithmic y-axis (on which a constant-percentage taper is a straight line, making any departure from the intended curve obvious).
@@ -38,11 +43,10 @@ HyperTaper is a pure client-side web application designed to assist clinicians i
 
 ### Known limitations
 
-- **Solid dose forms only.** Hyperbolic tapering to very low doses generally
-  needs a liquid or compounded formulation; with tablets alone the tail of the
-  curve is limited by the smallest piece available, and the app warns when this
-  forces a step steeper than requested. Support for continuous formulations is
-  the most significant outstanding feature.
+- **Liquids are idealised.** A liquid dose is assumed to be measured exactly to
+  the stated increment. The concentration of a compounded liquid should be
+  confirmed with the dispensing pharmacy, and its shelf life may mean the total
+  volume needs to be supplied in several batches.
 - **Dose, not receptor occupancy.** The percentage mode reduces the *dose* by a
   fixed proportion. This is the practical approximation the Maudsley guidance
   works with; it is not the same as reducing receptor occupancy linearly, which

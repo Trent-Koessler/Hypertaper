@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { generateSchedule, findBestTabletCombination } from './weaningLogic';
-import { DrugConfig, WeanConfig, Denomination } from '../types';
+import { generateSchedule, findBestTabletCombination, findLiquidDose } from './weaningLogic';
+import { DrugConfig, WeanConfig, Denomination, LiquidConfig } from '../types';
 
 const drug = (denominations: Denomination[], overrides: Partial<DrugConfig> = {}): DrugConfig => ({
   name: 'Test',
@@ -410,5 +410,113 @@ describe('derivation', () => {
     expect(result.startingDose).toBe(50);
     expect(result.derivation[0].percentOfStartingDose).toBe(100);
     expect(result.derivation[result.derivation.length - 1].percentOfStartingDose).toBe(50);
+  });
+});
+
+describe('liquid formulation', () => {
+  const liquid = (overrides: Partial<LiquidConfig> = {}): LiquidConfig => ({
+    enabled: true,
+    mode: 'below',
+    switchBelowDose: 2,
+    concentration: 1,
+    measureIncrementMl: 0.1,
+    ...overrides
+  });
+  const DIAZEPAM: Denomination[] = [
+    { id: '5', strength: 5, canSplit: 'quarter' },
+    { id: '2', strength: 2, canSplit: 'quarter' }
+  ];
+
+  it('rounds a liquid dose down to whole measuring increments', () => {
+    expect(findLiquidDose(1.85, liquid())).toEqual({ actualDose: 1.8, tablets: {}, pieces: [], liquidMl: 1.8 });
+    expect(findLiquidDose(1.8, liquid()).actualDose).toBe(1.8);
+    expect(findLiquidDose(0.95, liquid({ concentration: 2, measureIncrementMl: 0.2 })).liquidMl).toBe(0.4);
+    expect(findLiquidDose(0.05, liquid()).actualDose).toBe(0);
+  });
+
+  it('switches to liquid only once the target falls below the switch dose', () => {
+    const result = generateSchedule(drug(DIAZEPAM, { currentDose: 10, liquid: liquid() }), wean());
+    const held = result.steps.filter(step => !step.isStop);
+    held.forEach(step => {
+      if (step.targetDose >= 2) expect(step.liquidMl).toBeUndefined();
+      else expect(step.liquidMl).toBeGreaterThan(0);
+    });
+    expect(held.some(step => step.liquidMl !== undefined)).toBe(true);
+  });
+
+  it('removes the steep tail drop that quartered tablets force', () => {
+    const steepest = (result: ReturnType<typeof generateSchedule>) =>
+      Math.max(...result.steps.filter(step => !step.isStop).map(step => step.reductionPercent ?? 0));
+
+    // Quartered 2mg tablets can only go 1mg -> 0.5mg at the end: a 50% cut.
+    const tabletsOnly = generateSchedule(drug(DIAZEPAM, { currentDose: 10 }), wean());
+    expect(steepest(tabletsOnly)).toBe(50);
+
+    // 0.1mL of a 1mg/mL liquid keeps every step within a few points of 10%.
+    const withLiquid = generateSchedule(drug(DIAZEPAM, { currentDose: 10, liquid: liquid() }), wean());
+    expect(steepest(withLiquid)).toBeLessThan(20);
+
+    // A finer measure removes the steep-drop warning altogether.
+    const finer = generateSchedule(
+      drug(DIAZEPAM, { currentDose: 10, liquid: liquid({ measureIncrementMl: 0.05 }) }),
+      wean()
+    );
+    expect(finer.warnings.some(w => w.includes('steeper than the requested reduction'))).toBe(false);
+  });
+
+  it('never steps up when changing from tablets to liquid', () => {
+    // 5mg whole tablets only: tablets fall far below the curve, and the liquid
+    // tracks the curve closely, so the first liquid dose would exceed the last tablet dose.
+    const coarse: Denomination[] = [{ id: '5', strength: 5, canSplit: 'no' }];
+    const result = generateSchedule(
+      drug(coarse, { currentDose: 10, liquid: liquid({ switchBelowDose: 8 }) }),
+      wean()
+    );
+    const doses = result.steps.map(step => step.actualDose);
+    for (let i = 1; i < doses.length; i++) expect(doses[i]).toBeLessThanOrEqual(doses[i - 1]);
+  });
+
+  it('gives every step as liquid in whole-taper mode, without needing tablets', () => {
+    const result = generateSchedule(drug([], { currentDose: 10, liquid: liquid({ mode: 'whole' }) }), wean());
+    const held = result.steps.filter(step => !step.isStop);
+    expect(held.length).toBeGreaterThan(0);
+    held.forEach(step => {
+      expect(step.liquidMl).toBeGreaterThan(0);
+      expect(step.tablets).toEqual({});
+      expect(step.actualDose).toBeLessThanOrEqual(step.targetDose);
+    });
+    expect(result.endReason).toBe('reached-stop-dose');
+  });
+
+  it('totals liquid volume over each step duration', () => {
+    const result = generateSchedule(drug([], { currentDose: 10, liquid: liquid({ mode: 'whole' }) }), wean());
+    const expected = result.steps
+      .filter(step => step.liquidMl !== undefined)
+      .reduce((sum, step) => sum + step.liquidMl! * step.durationDays, 0);
+    expect(result.totalLiquidMl).toBeCloseTo(expected, 4);
+    expect(result.totalTablets).toEqual({});
+  });
+
+  it('shows the volume arithmetic in the derivation', () => {
+    const result = generateSchedule(drug([], { currentDose: 10, liquid: liquid({ mode: 'whole' }) }), wean());
+    expect(result.derivation[1].actualFormula).toBe('9mL x 1mg/mL = 9mg');
+  });
+
+  it('ignores the liquid settings when liquid is switched off', () => {
+    const off = generateSchedule(
+      drug(DIAZEPAM, { currentDose: 10, liquid: liquid({ enabled: false, mode: 'whole' }) }),
+      wean()
+    );
+    expect(off.steps.every(step => step.liquidMl === undefined)).toBe(true);
+    expect(off.totalLiquidMl).toBe(0);
+  });
+
+  it('rejects an unusable liquid', () => {
+    const result = generateSchedule(
+      drug(DIAZEPAM, { currentDose: 10, liquid: liquid({ concentration: 0 }) }),
+      wean()
+    );
+    expect(result.steps).toEqual([]);
+    expect(result.warnings.some(w => w.includes('liquid concentration'))).toBe(true);
   });
 });
