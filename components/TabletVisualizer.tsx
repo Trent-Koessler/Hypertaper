@@ -9,6 +9,8 @@ interface TabletVisualizerProps {
   /** Daily liquid volume, when the step is given as liquid instead of tablets. */
   liquidMl?: number;
   concentration?: number;
+  /** Shown when nothing is taken, e.g. "None" for an empty morning dose. */
+  emptyLabel?: string;
 }
 
 const FRACTION_LABELS: { [fraction: string]: string } = {
@@ -17,8 +19,8 @@ const FRACTION_LABELS: { [fraction: string]: string } = {
   '0.75': '¾'
 };
 
-const TabletVisualizer: React.FC<TabletVisualizerProps> = ({ counts, denominations, unit, liquidMl, concentration }) => {
-  if (liquidMl !== undefined) {
+const TabletVisualizer: React.FC<TabletVisualizerProps> = ({ counts, denominations, unit, liquidMl, concentration, emptyLabel = 'No medication' }) => {
+  if (liquidMl) {
     return (
       <div className="inline-flex items-center gap-1.5 bg-sky-50 dark:bg-sky-900/30 rounded-full px-2.5 py-1 border border-sky-200 dark:border-sky-800 text-xs font-medium text-sky-800 dark:text-sky-200">
         <Droplet size={13} className="text-sky-500 fill-sky-100 dark:fill-sky-900" />
@@ -29,7 +31,7 @@ const TabletVisualizer: React.FC<TabletVisualizerProps> = ({ counts, denominatio
 
   const items = (Object.entries(counts) as [string, number][]).filter(([_, count]) => count > 0);
 
-  if (items.length === 0) return <span className="text-slate-400 dark:text-slate-500 text-xs">No medication</span>;
+  if (items.length === 0) return <span className="text-slate-400 dark:text-slate-500 text-xs">{emptyLabel}</span>;
 
   return (
     <div className="flex flex-wrap gap-2 items-center">

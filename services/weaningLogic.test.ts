@@ -520,3 +520,92 @@ describe('liquid formulation', () => {
     expect(result.warnings.some(w => w.includes('liquid concentration'))).toBe(true);
   });
 });
+
+describe('morning and night split', () => {
+  const DIAZEPAM: Denomination[] = [
+    { id: '5', strength: 5, canSplit: 'quarter' },
+    { id: '2', strength: 2, canSplit: 'quarter' }
+  ];
+  const twice = (overrides: Partial<DrugConfig> = {}) =>
+    drug(DIAZEPAM, { currentDose: 10, dosesPerDay: 2, ...overrides });
+
+  it('does not change the daily dose, only how it is taken', () => {
+    const once = generateSchedule(drug(DIAZEPAM, { currentDose: 10 }), wean());
+    const split = generateSchedule(twice(), wean());
+    expect(split.derivation.map(e => e.actualDose)).toEqual(once.derivation.map(e => e.actualDose));
+  });
+
+  it('makes morning plus night equal the daily dose, with night the larger', () => {
+    const result = generateSchedule(twice(), wean());
+    result.steps.filter(step => !step.isStop).forEach(step => {
+      const { am, pm } = step.split!;
+      expect(am.dose + pm.dose).toBeCloseTo(step.actualDose, 6);
+      expect(am.dose).toBeLessThanOrEqual(pm.dose);
+    });
+  });
+
+  it('counts the tablets for each dose time, and the daily tablets are their sum', () => {
+    const result = generateSchedule(twice(), wean());
+    result.steps.filter(step => !step.isStop).forEach(step => {
+      const { am, pm } = step.split!;
+      const ids = new Set([...Object.keys(am.tablets), ...Object.keys(pm.tablets), ...Object.keys(step.tablets)]);
+      ids.forEach(id => {
+        expect((am.tablets[id] ?? 0) + (pm.tablets[id] ?? 0)).toBeCloseTo(step.tablets[id] ?? 0, 6);
+      });
+      [am, pm].forEach(part => {
+        const fromPieces = part.pieces.reduce((sum, p) => sum + p.subtotal, 0);
+        expect(fromPieces).toBeCloseTo(part.dose, 6);
+      });
+    });
+  });
+
+  it('splits evenly when the pieces allow it', () => {
+    const { split } = findBestTabletCombination(10, DIAZEPAM, true);
+    expect(split!.am.dose).toBe(5);
+    expect(split!.pm.dose).toBe(5);
+    expect(split!.am.tablets).toEqual({ '5': 1 });
+  });
+
+  it('puts the uneven part at night', () => {
+    // 7.25mg: 3.625mg is not achievable, so the morning takes the next dose down.
+    const { split } = findBestTabletCombination(7.25, DIAZEPAM, true);
+    expect(split!.am.dose).toBe(3.5);
+    expect(split!.pm.dose).toBe(3.75);
+  });
+
+  it('gives the whole dose at night when it cannot be shared, and says so', () => {
+    const { split } = findBestTabletCombination(1.25, DIAZEPAM, true);
+    expect(split!.am.dose).toBe(0);
+    expect(split!.pm.dose).toBe(1.25);
+
+    const result = generateSchedule(twice(), wean());
+    expect(result.warnings.some(w => w.includes('cannot divide the daily dose evenly'))).toBe(true);
+  });
+
+  it('does not warn about the split when every dose divides evenly', () => {
+    const halves: Denomination[] = [{ id: '10', strength: 10, canSplit: 'half' }];
+    const result = generateSchedule(
+      drug(halves, { currentDose: 20, dosesPerDay: 2 }),
+      wean({ reductionType: 'fixed', reductionValue: 10, minimumDoseThreshold: 10 })
+    );
+    expect(result.warnings.some(w => w.includes('cannot divide'))).toBe(false);
+    expect(result.steps[0].split!.am.tablets).toEqual({ '10': 1 });
+  });
+
+  it('leaves once-daily plans without a split', () => {
+    const result = generateSchedule(drug(DIAZEPAM, { currentDose: 10 }), wean());
+    expect(result.steps.every(step => step.split === undefined)).toBe(true);
+  });
+
+  it('splits a liquid dose into whole measures, odd measure at night', () => {
+    const liquid: LiquidConfig = { enabled: true, mode: 'whole', switchBelowDose: 2, concentration: 1, measureIncrementMl: 0.1 };
+    const { split } = findLiquidDose(1.9, liquid, true);
+    expect(split!.am.liquidMl).toBe(0.9);
+    expect(split!.pm.liquidMl).toBe(1);
+  });
+
+  it('shows the split arithmetic in the derivation', () => {
+    const result = generateSchedule(twice(), wean());
+    expect(result.derivation[0].splitFormula).toBe('AM: 1 x 5mg = 5mg | PM: 1 x 5mg = 5mg');
+  });
+});

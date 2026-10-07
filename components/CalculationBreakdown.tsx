@@ -38,9 +38,12 @@ const CalculationBreakdown: React.FC<CalculationBreakdownProps> = ({ drug, wean,
       `2. Achievable dose. For each target, the engine searches every combination of the available pieces and takes the largest total that does not exceed the target. It never rounds up, so no step can prescribe more than the curve asks for.${liquid ? ` ${liquid.mode === 'whole' ? 'Every target' : `A target below ${num(liquid.switchBelowDose)}${unit}`} is given as liquid instead: the largest whole number of ${num(liquid.measureIncrementMl)}mL measures (${num(liquidIncrement)}${unit} each at ${num(liquid.concentration)}${unit}/mL) that does not exceed the target. If changing formulation would raise the dose above the previous step, the previous dose is held instead.` : ''}`,
       `3. Holding. When two consecutive intervals resolve to the same achievable dose, they are merged into one held step. The dose is held until the curve falls far enough to justify the next achievable dose down.`,
       `4. Stopping. Intervals are generated while target(n) is at or above the stop dose of ${num(wean.minimumDoseThreshold)}${unit}, so the stop dose itself is prescribed before cessation.`,
-      `5. Preference. Among combinations that reach the same dose, the engine prefers the fewest pieces, and then the fewest cut tablets.`
+      `5. Preference. Among combinations that reach the same dose, the engine prefers the fewest pieces, and then the fewest cut tablets.`,
+      ...(drug.dosesPerDay === 2
+        ? [`6. Morning and night. Each daily dose is divided into the most even morning and night doses the pieces allow, with any uneven part at night. The split never changes the daily total.`]
+        : [])
     ];
-  }, [wean, schedule.startingDose, intervalDays, unit, liquid, liquidIncrement]);
+  }, [wean, schedule.startingDose, intervalDays, unit, liquid, liquidIncrement, drug.dosesPerDay]);
 
   const totalsRows = useMemo(
     () =>
@@ -116,6 +119,7 @@ const CalculationBreakdown: React.FC<CalculationBreakdownProps> = ({ drug, wean,
           change.padEnd(11) +
           `${num(entry.percentOfStartingDose, 1)}%`
       );
+      if (entry.startsNewStep && entry.splitFormula) lines.push(`      ${entry.splitFormula}`);
     });
     lines.push('');
     lines.push('TOTAL TABLETS (daily count x days held, summed over steps)');
@@ -258,6 +262,9 @@ const CalculationBreakdown: React.FC<CalculationBreakdownProps> = ({ drug, wean,
                       <td className="py-1.5 pr-3 whitespace-nowrap">{entry.targetFormula}</td>
                       <td className="py-1.5 pr-3">
                         {entry.startsNewStep ? entry.actualFormula : `held at ${num(entry.actualDose)}${unit}`}
+                        {entry.startsNewStep && entry.splitFormula && (
+                          <span className="block text-[11px] text-slate-400 dark:text-slate-500">{entry.splitFormula}</span>
+                        )}
                       </td>
                       <td className="py-1.5 pr-3 text-right">{num(entry.shortfall, 3)}</td>
                       <td className="py-1.5 pr-3 text-right">

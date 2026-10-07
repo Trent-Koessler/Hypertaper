@@ -29,6 +29,8 @@ export interface DrugConfig {
   startDate: string; // ISO date string
   denominations: Denomination[];
   liquid?: LiquidConfig;
+  /** 2 divides each daily dose into a morning and a night dose. Absent or 1 means once daily. */
+  dosesPerDay?: 1 | 2;
 }
 
 export interface WeanConfig {
@@ -47,6 +49,20 @@ export interface DosePiece {
   subtotal: number; // pieceCount x strength
 }
 
+/** One administration within a day (e.g. the morning dose) and what it is made of. */
+export interface DoseBreakdown {
+  dose: number;
+  tablets: { [denomId: string]: number }; // Tablet-equivalents of each denomination
+  pieces: DosePiece[];
+  liquidMl?: number;
+}
+
+/** A daily dose divided into a morning and a night dose; any uneven part goes at night. */
+export interface SplitDose {
+  am: DoseBreakdown;
+  pm: DoseBreakdown;
+}
+
 export interface ScheduleStep {
   date: string;
   dayIndex: number;
@@ -57,6 +73,8 @@ export interface ScheduleStep {
   pieces: DosePiece[]; // The same dose broken down into physically takeable pieces
   /** Daily volume of liquid in mL, when this step is given as liquid. Tablets and pieces are then empty. */
   liquidMl?: number;
+  /** Present when dosing twice daily. Tablets, pieces and liquidMl above are the daily totals of both. */
+  split?: SplitDose;
   /** Drop from the previously *prescribed* dose. Null on the first step. */
   reductionFromPrevious: number | null;
   /** The same drop as a percentage of the previously prescribed dose. */
@@ -77,6 +95,8 @@ export interface DerivationEntry {
   targetFormula: string; // e.g. "50 x (1 - 0.10)^3 = 36.45mg"
   actualDose: number;
   actualFormula: string; // e.g. "1 x 25mg + 1 x 5mg = 30mg"
+  /** "AM: ... | PM: ..." when dosing twice daily. */
+  splitFormula?: string;
   pieces: DosePiece[];
   shortfall: number; // targetDose - actualDose
   startsNewStep: boolean; // False while the previous dose is still being held

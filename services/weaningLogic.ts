@@ -7,7 +7,9 @@ import {
   Denomination,
   DerivationEntry,
   DosePiece,
-  LiquidConfig
+  DoseBreakdown,
+  LiquidConfig,
+  SplitDose
 } from '../types';
 import { addDaysISO, isValidISODate, todayISO } from './dateUtils';
 
@@ -91,6 +93,8 @@ export interface TabletCombination {
   pieces: DosePiece[];
   /** Daily volume in mL when the dose is given as liquid instead of tablets. */
   liquidMl?: number;
+  /** The daily dose divided into morning and night, when dosing twice daily. */
+  split?: SplitDose;
 }
 
 const EMPTY_COMBINATION: TabletCombination = { actualDose: 0, tablets: {}, pieces: [] };
@@ -105,10 +109,15 @@ const EMPTY_COMBINATION: TabletCombination = { actualDose: 0, tablets: {}, piece
  *
  * Runs an unbounded-knapsack DP over doses quantised to a common unit, so cost
  * is O(states x pieces) rather than exponential in the number of denominations.
+ *
+ * With `split`, the same daily dose is then divided into a morning and a night
+ * dose, each made of whole pieces. The split never changes the daily total —
+ * any set of pieces can be shared between two doses — only how it is taken.
  */
 export function findBestTabletCombination(
   targetDose: number,
-  denominations: Denomination[]
+  denominations: Denomination[],
+  split = false
 ): TabletCombination {
   if (!Number.isFinite(targetDose) || targetDose <= 0) return { ...EMPTY_COMBINATION };
 
@@ -157,21 +166,56 @@ export function findBestTabletCombination(
   while (value > 0 && cost[value] === UNREACHABLE) value--;
   if (value === 0) return { ...EMPTY_COMBINATION };
 
-  const tablets: { [id: string]: number } = {};
-  const pieceCounts = new Map<number, number>();
-  let exactDose = 0;
-  while (value > 0) {
-    const index = cameFrom[value];
-    if (index < 0) break;
-    const piece = pieces[index];
-    tablets[piece.denomId] = (tablets[piece.denomId] || 0) + piece.tabletFraction;
-    pieceCounts.set(index, (pieceCounts.get(index) || 0) + 1);
-    exactDose += piece.strength;
-    value -= pieceUnits[index];
+  /** Walks the DP back from a grid value to the piece indexes that make it up. */
+  const piecesFor = (start: number): Map<number, number> => {
+    const counts = new Map<number, number>();
+    let remaining = start;
+    while (remaining > 0) {
+      const index = cameFrom[remaining];
+      if (index < 0) break;
+      counts.set(index, (counts.get(index) || 0) + 1);
+      remaining -= pieceUnits[index];
+    }
+    return counts;
+  };
+
+  if (!split) {
+    const daily = toBreakdown(pieces, piecesFor(value));
+    return { actualDose: daily.dose, tablets: daily.tablets, pieces: daily.pieces };
   }
 
+  // The most even split: the largest morning dose that is no more than half the
+  // day and leaves an achievable night dose, so any uneven part goes at night.
+  // A zero morning dose is always possible, so this always finds a split.
+  for (let morning = Math.floor(value / 2); morning >= 0; morning--) {
+    if (cost[morning] === UNREACHABLE || cost[value - morning] === UNREACHABLE) continue;
+    const amCounts = piecesFor(morning);
+    const pmCounts = piecesFor(value - morning);
+    let am = toBreakdown(pieces, amCounts);
+    let pm = toBreakdown(pieces, pmCounts);
+    // Coarsened grids round pieces up, so exact doses can invert; night stays the larger.
+    if (am.dose > pm.dose) [am, pm] = [pm, am];
+
+    const dailyCounts = new Map(amCounts);
+    pmCounts.forEach((count, index) => dailyCounts.set(index, (dailyCounts.get(index) || 0) + count));
+    const daily = toBreakdown(pieces, dailyCounts);
+    return { actualDose: daily.dose, tablets: daily.tablets, pieces: daily.pieces, split: { am, pm } };
+  }
+  return { ...EMPTY_COMBINATION };
+}
+
+/** Turns piece counts (by index into `pieces`) into a dose with its tablets and pieces. */
+function toBreakdown(pieces: Piece[], counts: Map<number, number>): DoseBreakdown {
+  const tablets: { [id: string]: number } = {};
+  let exactDose = 0;
+  counts.forEach((count, index) => {
+    const piece = pieces[index];
+    tablets[piece.denomId] = (tablets[piece.denomId] || 0) + piece.tabletFraction * count;
+    exactDose += piece.strength * count;
+  });
+
   // Largest pieces first, so the breakdown reads the way it would be dispensed.
-  const breakdown: DosePiece[] = Array.from(pieceCounts.entries())
+  const breakdown: DosePiece[] = Array.from(counts.entries())
     .map(([index, pieceCount]) => ({
       denomId: pieces[index].denomId,
       strength: roundDose(pieces[index].strength),
@@ -182,7 +226,7 @@ export function findBestTabletCombination(
     .sort((a, b) => b.strength - a.strength);
 
   return {
-    actualDose: roundDose(exactDose),
+    dose: roundDose(exactDose),
     tablets: Object.fromEntries(Object.entries(tablets).map(([id, n]) => [id, roundDose(n)])),
     pieces: breakdown
   };
@@ -203,7 +247,7 @@ export function usesLiquid(liquid: LiquidConfig | undefined, targetDose: number)
  * The largest liquid dose that is a whole number of measuring increments and
  * does not exceed the target. Like the tablet search, it never rounds up.
  */
-export function findLiquidDose(targetDose: number, liquid: LiquidConfig): TabletCombination {
+export function findLiquidDose(targetDose: number, liquid: LiquidConfig, split = false): TabletCombination {
   const increment = liquidDoseIncrement(liquid);
   if (!Number.isFinite(targetDose) || targetDose <= 0 || !(increment > 0)) return { ...EMPTY_COMBINATION };
 
@@ -213,12 +257,22 @@ export function findLiquidDose(targetDose: number, liquid: LiquidConfig): Tablet
   if (increments <= 0) return { ...EMPTY_COMBINATION };
 
   const liquidMl = roundDose(increments * liquid.measureIncrementMl);
-  return {
+  const result: TabletCombination = {
     actualDose: roundDose(liquidMl * liquid.concentration),
     tablets: {},
     pieces: [],
     liquidMl
   };
+  if (split) {
+    // Whole measures each; an odd measure goes at night.
+    const measure = (count: number): DoseBreakdown => {
+      const ml = roundDose(count * liquid.measureIncrementMl);
+      return { dose: roundDose(ml * liquid.concentration), tablets: {}, pieces: [], liquidMl: ml };
+    };
+    const morning = Math.floor(increments / 2);
+    result.split = { am: measure(morning), pm: measure(increments - morning) };
+  }
+  return result;
 }
 
 /** "2 x 25mg + 1 x half of 10mg (5mg) = 55mg" — the arithmetic behind a dose. */
@@ -241,6 +295,12 @@ function describePieces(
     return `${p.pieceCount} x ${base}`;
   });
   return `${terms.join(' + ')} = ${num(actualDose)}${unit}`;
+}
+
+function describeSplit(split: SplitDose, unit: string, liquid?: LiquidConfig): string {
+  const part = (dose: DoseBreakdown) =>
+    dose.dose > 0 ? describePieces(dose.pieces, dose.dose, unit, dose.liquidMl, liquid) : 'none';
+  return `AM: ${part(split.am)} | PM: ${part(split.pm)}`;
 }
 
 function emptyResult(warnings: string[], startDate: string, startingDose: number): ScheduleResult {
@@ -343,6 +403,7 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
 
   const startingDose = drug.currentDose;
   const unit = drug.unit;
+  const splitDaily = drug.dosesPerDay === 2;
 
   // 1. Walk the taper curve, recording the achievable dose at each interval.
   //    The stop dose is inclusive: asking to stop at 5mg prescribes 5mg and
@@ -356,8 +417,8 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
     if (target <= EPSILON || target < threshold - EPSILON) break;
 
     let combination = usesLiquid(drug.liquid, target)
-      ? findLiquidDose(target, drug.liquid!)
-      : findBestTabletCombination(target, drug.denominations);
+      ? findLiquidDose(target, drug.liquid!, splitDaily)
+      : findBestTabletCombination(target, drug.denominations, splitDaily);
 
     // Changing formulation can land above the previous dose: tablets may have
     // fallen well short of an earlier target that the finer liquid now tracks
@@ -405,7 +466,7 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
 
   holds.forEach((hold, index) => {
     const date = addDaysISO(startDate, index * intervalDays);
-    const { actualDose, tablets, pieces, liquidMl } = hold.combination;
+    const { actualDose, tablets, pieces, liquidMl, split } = hold.combination;
     targetCurve.push({ date, dose: hold.target });
 
     const previous = steps[steps.length - 1];
@@ -425,6 +486,7 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
       targetFormula: targetFormula(startingDose, wean, index, hold.target, unit),
       actualDose,
       actualFormula: describePieces(pieces, actualDose, unit, liquidMl, drug.liquid),
+      ...(split ? { splitFormula: describeSplit(split, unit, drug.liquid) } : {}),
       pieces,
       shortfall: roundDose(hold.target - actualDose),
       startsNewStep,
@@ -444,6 +506,7 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
         tablets,
         pieces,
         ...(liquidMl !== undefined ? { liquidMl } : {}),
+        ...(split ? { split } : {}),
         reductionFromPrevious,
         reductionPercent,
         isStop: false
@@ -526,6 +589,15 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
     const from = roundDose(worstDrop.actualDose + (worstDrop.reductionFromPrevious ?? 0));
     warnings.push(
       `The available ${worstDrop.liquidMl !== undefined ? 'liquid measure forces' : 'strengths force'} a ${num(worstDrop.reductionPercent!, 1)}% drop on ${worstDrop.date} (${num(from)}${unit} to ${num(worstDrop.actualDose)}${unit}), which is steeper than the requested reduction. ${worstDrop.liquidMl !== undefined ? 'Measure a smaller volume, use a more dilute liquid,' : 'Add a smaller strength, allow splitting,'} or lengthen the interval so the patient holds each dose for longer.`
+    );
+  }
+
+  // Pieces cannot always be shared evenly; a lopsided split changes how the day
+  // is covered, so say where it first happens.
+  const uneven = steps.find(step => step.split && step.split.am.dose < step.split.pm.dose / 2 - EPSILON);
+  if (uneven?.split) {
+    warnings.push(
+      `From ${uneven.date} the available pieces cannot divide the daily dose evenly: ${num(uneven.split.am.dose)}${unit} in the morning and ${num(uneven.split.pm.dose)}${unit} at night.${uneven.split.am.dose === 0 ? ' The whole dose is taken at night.' : ''}`
     );
   }
 

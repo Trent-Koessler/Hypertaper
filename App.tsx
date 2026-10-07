@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Pill, Calculator, Calendar, Activity, Info, AlertCircle, AlertTriangle, Plus, Trash2, Printer, Scissors, Sun, Moon, Copy, Check, Droplet } from 'lucide-react';
-import { DrugConfig, WeanConfig, Denomination, ScheduleStep, LiquidConfig } from './types';
+import { DrugConfig, WeanConfig, Denomination, ScheduleStep, LiquidConfig, DoseBreakdown } from './types';
 import { generateSchedule } from './services/weaningLogic';
 import { formatISODate, todayISO } from './services/dateUtils';
 import WeanChart from './components/WeanChart';
@@ -52,24 +52,24 @@ const formatCount = (count: number): string => count.toFixed(count % 1 === 0 ? 0
 const formatDose = (value: number, decimals = 2): string =>
   String(parseFloat(value.toFixed(decimals)));
 
-/** "2x 50mg, 1x 25mg" (or "1.8mL of 1mg/mL liquid") for a step, optionally scaled over the whole step. */
+/** "2x 50mg, 1x 25mg" (or "1.8mL of 1mg/mL liquid") for a dose, optionally scaled over the whole step. */
 const describeTablets = (
-  step: ScheduleStep,
+  dose: Pick<ScheduleStep, 'tablets' | 'liquidMl'> | DoseBreakdown,
   denominations: Denomination[],
   unit: string,
   multiplier = 1,
   liquid?: LiquidConfig
 ): string =>
-  step.liquidMl !== undefined && liquid
-    ? `${formatDose(step.liquidMl * multiplier, 3)}mL of ${formatDose(liquid.concentration, 3)}${unit}/mL liquid`
-    : Object.entries(step.tablets)
+  dose.liquidMl && liquid
+    ? `${formatDose(dose.liquidMl * multiplier, 3)}mL of ${formatDose(liquid.concentration, 3)}${unit}/mL liquid`
+    : Object.entries(dose.tablets)
     .filter(([, count]) => count > 0)
     .map(([id, count]) => {
       const denom = denominations.find(d => d.id === id);
       return denom ? `${formatCount(count * multiplier)}x ${denom.strength}${unit}` : '';
     })
     .filter(Boolean)
-    .join(', ');
+    .join(', ') || 'none';
 
 const describeDuration = (days: number): string => {
   if (days % 7 === 0 && days >= 7) {
@@ -99,7 +99,9 @@ const App: React.FC = () => {
       switchBelowDose: 2,
       concentration: 1,
       measureIncrementMl: 0.1
-    }
+    },
+    // Diazepam is usually divided morning and night, as in the Maudsley tables.
+    dosesPerDay: 2
   });
 
   const [wean, setWean] = useState<WeanConfig>({
@@ -187,6 +189,7 @@ const App: React.FC = () => {
   const liquid = drug.liquid;
   const liquidOn = !!liquid?.enabled;
   const liquidOnly = liquidOn && liquid!.mode === 'whole';
+  const twiceDaily = drug.dosesPerDay === 2;
 
   const handleDrugChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const val = e.target.value;
@@ -215,6 +218,7 @@ const App: React.FC = () => {
     text += `Start Dose: ${drug.currentDose}${drug.unit}\n`;
     text += `Reduction: ${wean.reductionType === 'percentage' ? `${wean.reductionValue}%` : `${wean.reductionValue}${drug.unit}`} every ${wean.intervalDays} days\n`;
     text += `Stop Dose: ${wean.minimumDoseThreshold}${drug.unit}\n`;
+    text += `Dosing: ${twiceDaily ? 'twice daily (morning and night)' : 'once daily'}\n`;
     if (liquidOn) {
       text += `Liquid: ${liquid!.concentration}${drug.unit}/mL, measured to ${liquid!.measureIncrementMl}mL, `
         + (liquidOnly ? `for the whole taper\n` : `for doses below ${liquid!.switchBelowDose}${drug.unit}\n`);
@@ -233,9 +237,12 @@ const App: React.FC = () => {
         return;
       }
 
-      const daily = describeTablets(step, drug.denominations, drug.unit, 1, liquid);
       const stepTotal = describeTablets(step, drug.denominations, drug.unit, step.durationDays, liquid);
-      const instruction = `${daily} daily (step total: ${stepTotal})`;
+      const timing = step.split
+        ? `Morning ${formatDose(step.split.am.dose, 3)}${drug.unit} (${describeTablets(step.split.am, drug.denominations, drug.unit, 1, liquid)}), `
+          + `Night ${formatDose(step.split.pm.dose, 3)}${drug.unit} (${describeTablets(step.split.pm, drug.denominations, drug.unit, 1, liquid)})`
+        : `${describeTablets(step, drug.denominations, drug.unit, 1, liquid)} daily`;
+      const instruction = `${timing} (step total: ${stepTotal})`;
 
       text += dateStr.padEnd(dateColWidth)
         + `${formatDose(step.actualDose, 3)}${drug.unit}`.padEnd(doseColWidth)
@@ -267,7 +274,7 @@ const App: React.FC = () => {
     }
 
     return text;
-  }, [schedule, drug, wean, hasSchedule, liquid, liquidOn, liquidOnly]);
+  }, [schedule, drug, wean, hasSchedule, liquid, liquidOn, liquidOnly, twiceDaily]);
 
   const copyEmrText = async () => {
     try {
@@ -403,6 +410,23 @@ const App: React.FC = () => {
                   onChange={e => setDrug({...drug, startDate: e.target.value})}
                   className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg outline-none bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-100"
                 />
+              </div>
+
+              <div>
+                <span className="block text-xs font-medium text-slate-500 dark:text-slate-400 uppercase mb-1">Doses Per Day</span>
+                <div className="flex bg-slate-100 dark:bg-slate-700 p-1 rounded-lg" role="radiogroup" aria-label="Doses per day">
+                  {([[1, 'Once daily'], [2, 'Morning + night']] as const).map(([count, label]) => (
+                    <button
+                      key={count}
+                      role="radio"
+                      aria-checked={(drug.dosesPerDay ?? 1) === count}
+                      onClick={() => setDrug(prev => ({ ...prev, dosesPerDay: count }))}
+                      className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-all ${(drug.dosesPerDay ?? 1) === count ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <div>
@@ -545,7 +569,7 @@ const App: React.FC = () => {
                         <Info size={14} className="mt-0.5 flex-shrink-0" />
                         <span>
                           Smallest dose change: {formatDose(liquid.concentration * liquid.measureIncrementMl, 4)}{drug.unit}.
-                          Check the strength with the dispensing pharmacy — in Australia an oral liquid is often compounded.
+                          In Australia, Diazepam Elixir is 1mg/mL in 100mL bottles.
                         </span>
                       </p>
                     </div>
@@ -766,7 +790,9 @@ const App: React.FC = () => {
                         <th scope="col" className="px-6 py-3">Date</th>
                         <th scope="col" className="px-6 py-3">Step</th>
                         <th scope="col" className="px-6 py-3">Target vs Actual</th>
-                        <th scope="col" className="px-6 py-3">{liquidOn ? 'Tablets / Liquid (Daily)' : 'Tablets Required (Daily)'}</th>
+                        <th scope="col" className="px-6 py-3">
+                          {twiceDaily ? 'Morning / Night' : liquidOn ? 'Tablets / Liquid (Daily)' : 'Tablets Required (Daily)'}
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
@@ -808,13 +834,36 @@ const App: React.FC = () => {
                             </div>
                           </td>
                           <td className="px-6 py-4">
-                            <TabletVisualizer
-                              counts={step.tablets}
-                              denominations={drug.denominations}
-                              unit={drug.unit}
-                              liquidMl={step.liquidMl}
-                              concentration={liquid?.concentration}
-                            />
+                            {step.split ? (
+                              <div className="space-y-2">
+                                {([['Morning', step.split.am], ['Night', step.split.pm]] as const).map(([when, part]) => (
+                                  <div key={when} className="flex items-center gap-2">
+                                    <span className="w-24 flex-shrink-0 text-xs text-slate-500 dark:text-slate-400">
+                                      {when}
+                                      <span className="block font-semibold text-slate-700 dark:text-slate-200">
+                                        {formatDose(part.dose, 3)}{drug.unit}
+                                      </span>
+                                    </span>
+                                    <TabletVisualizer
+                                      counts={part.tablets}
+                                      denominations={drug.denominations}
+                                      unit={drug.unit}
+                                      liquidMl={part.liquidMl}
+                                      concentration={liquid?.concentration}
+                                      emptyLabel="None"
+                                    />
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <TabletVisualizer
+                                counts={step.tablets}
+                                denominations={drug.denominations}
+                                unit={drug.unit}
+                                liquidMl={step.liquidMl}
+                                concentration={liquid?.concentration}
+                              />
+                            )}
                             {!step.isStop && (
                               <div className="mt-2 text-[11px] text-slate-500 dark:text-slate-400 border-t border-slate-100 dark:border-slate-700/50 pt-2 font-medium">
                                 Step Total: {describeTablets(step, drug.denominations, drug.unit, step.durationDays, liquid)}

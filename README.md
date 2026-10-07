@@ -8,6 +8,10 @@ HyperTaper is a pure client-side web application designed to assist clinicians i
 - **Precise Tapering Algorithms**: Supports both fixed-dose and hyperbolic (percentage-based) reductions.
 - **Tablet Splitting Logic**: Automatically calculates fractional pill requirements based on available denominations and safe splitting practices.
 - **Never Overshoots**: Each step uses the largest dose the available tablets can actually make *without exceeding* the taper target, and holds it until the target falls to the next achievable dose.
+- **Morning and Night Doses**: Divide each daily dose into the most even morning and night
+  doses the tablet pieces (or liquid measures) allow, with any uneven part at night, as in the
+  Maudsley tables. Each dose time lists its own tablets, and the plan warns when a dose cannot
+  be shared evenly. The split never changes the daily total.
 - **Liquid Formulations**: Optionally give the whole taper, or just the doses below a chosen
   level, as an oral liquid. Enter the concentration (e.g. 1mg/mL) and the smallest volume that
   can be measured (e.g. 0.1mL); each liquid dose is rounded *down* to whole measures. This keeps
@@ -53,8 +57,8 @@ HyperTaper is a pure client-side web application designed to assist clinicians i
   would need drug-specific occupancy parameters.
 - **Splitting is assumed exact.** Real halves and quarters vary by roughly
   10–20% of the intended piece, which matters most at the smallest doses.
-- **Total daily dose only.** How the dose is divided across the day is a
-  separate clinical decision and is not modelled.
+- **At most twice daily.** Doses can be given once daily or morning and night;
+  three or more doses a day are not modelled.
 
 ## Development
 
