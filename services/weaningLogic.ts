@@ -480,11 +480,15 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
   const targetCurve: { date: string; dose: number }[] = [];
   const derivation: DerivationEntry[] = [];
   const totalTablets: { [denomId: string]: number } = {};
-  let dayIndex = 0;
+  // With reduceOnStartDate the current dose's first interval has already been
+  // held before the start date, so the timeline begins one interval earlier
+  // and that part is trimmed off below. Day 0 is always the start date.
+  const offsetDays = wean.reduceOnStartDate ? intervalDays : 0;
+  let dayIndex = -offsetDays;
   let previousDose: number | null = null;
 
   holds.forEach((hold, index) => {
-    const date = addDaysISO(startDate, index * intervalDays);
+    const date = addDaysISO(startDate, index * intervalDays - offsetDays);
     const { actualDose, tablets, pieces, liquidMl, split } = hold.combination;
     targetCurve.push({ date, dose: hold.target });
 
@@ -537,6 +541,22 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
     dayIndex += intervalDays;
   });
 
+  const lastPrescribed = steps[steps.length - 1];
+
+  // Drop the part of the current dose that falls before the start date. If the
+  // tablets cannot make the first reduction, the current dose carries on past
+  // the start date, and that remainder stays in the plan.
+  if (offsetDays > 0) {
+    const first = steps[0];
+    first.durationDays -= offsetDays;
+    if (first.durationDays <= 0) {
+      steps.shift();
+    } else {
+      first.date = startDate;
+      first.dayIndex = 0;
+    }
+  }
+
   let totalLiquidMl = 0;
   steps.forEach(step => {
     Object.entries(step.tablets).forEach(([id, count]) => {
@@ -546,7 +566,6 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
   });
 
   const endDate = addDaysISO(startDate, dayIndex);
-  const lastPrescribed = steps[steps.length - 1];
 
   // A truncated plan has not finished tapering, so it must not print a cessation
   // instruction: doing so would tell the prescriber to stop from a dose the
@@ -569,6 +588,10 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
   // Carry the ideal curve to the end date so it spans the same range as the plan.
   const finalTarget = targetAtInterval(startingDose, wean, holds.length);
   targetCurve.push({ date: endDate, dose: roundDose(Math.max(0, finalTarget)) });
+  // The chart starts on the start date; points before it belong to doses already taken.
+  if (offsetDays > 0) {
+    while (targetCurve.length > 1 && targetCurve[0].date < startDate) targetCurve.shift();
+  }
 
   // 3. Warn when the available tablets cannot express the requested curve.
   // The first reduction is made in whichever form the plan starts on.
@@ -576,9 +599,10 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
   const smallestPiece = startsOnLiquid
     ? liquidDoseIncrement(drug.liquid!)
     : Math.min(...buildPieces(drug.denominations).map(p => p.strength));
-  if (steps[0].actualDose < startingDose - EPSILON) {
+  const firstHeldDose = holds[0].combination.actualDose;
+  if (firstHeldDose < startingDose - EPSILON) {
     warnings.push(
-      `A dose of ${num(startingDose)}${unit} cannot be made from the available strengths; the plan starts at ${num(steps[0].actualDose)}${unit}.`
+      `A dose of ${num(startingDose)}${unit} cannot be made from the available strengths; the plan starts at ${num(firstHeldDose)}${unit}.`
     );
   }
   const firstReduction = wean.reductionType === 'percentage'
@@ -637,7 +661,8 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
     durationWeeks: Math.ceil(dayIndex / 7),
     endDate,
     endReason,
-    reductionStepCount: Math.max(0, steps.filter(s => !s.isStop).length - 1),
+    // Every held step after the current dose is a reduction.
+    reductionStepCount: steps.filter(s => !s.isStop && s.reductionFromPrevious !== null).length,
     warnings
   };
 }

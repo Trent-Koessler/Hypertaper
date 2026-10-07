@@ -33,6 +33,8 @@ const CalculationBreakdown: React.FC<CalculationBreakdownProps> = ({ drug, wean,
   const liquid = drug.liquid?.enabled ? drug.liquid : undefined;
   const liquidIncrement = liquid ? liquid.concentration * liquid.measureIncrementMl : 0;
   const intervalDays = Math.max(1, Math.round(wean.intervalDays || 1));
+  // With the first reduction on the start date, interval 0 was taken before the plan began.
+  const planIntervals = schedule.derivation.length - (wean.reduceOnStartDate ? 1 : 0);
 
   const methodLines = useMemo(() => {
     const curve = wean.reductionType === 'percentage'
@@ -136,7 +138,7 @@ const CalculationBreakdown: React.FC<CalculationBreakdownProps> = ({ drug, wean,
     lines.push('');
     lines.push('DURATION');
     lines.push(
-      `  ${schedule.derivation.length} interval(s) x ${intervalDays} day(s) = ${schedule.totalDays} days = ${schedule.durationWeeks} week(s), rounded up`
+      `  ${planIntervals} interval(s) x ${intervalDays} day(s) = ${schedule.totalDays} days = ${schedule.durationWeeks} week(s), rounded up`
     );
     lines.push(`  Start ${drug.startDate} -> end ${schedule.endDate}`);
     lines.push(`  ${END_REASON_TEXT[schedule.endReason]}`);
@@ -286,6 +288,12 @@ const CalculationBreakdown: React.FC<CalculationBreakdownProps> = ({ drug, wean,
               Greyed rows are intervals where the previous dose is still held because no smaller achievable
               dose had yet come within reach of the curve.
             </p>
+            {wean.reduceOnStartDate && (
+              <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">
+                Interval 0 is the current dose, already being taken before the start date. The first reduction
+                (interval 1) is made on the start date, so interval 0 is not counted in the duration or tablet totals.
+              </p>
+            )}
           </section>
 
           <section>
@@ -309,7 +317,7 @@ const CalculationBreakdown: React.FC<CalculationBreakdownProps> = ({ drug, wean,
           <section>
             <h4 className="text-xs font-bold uppercase text-slate-500 dark:text-slate-400 mb-2">Duration</h4>
             <p className="font-mono text-xs text-slate-600 dark:text-slate-300">
-              {schedule.derivation.length} interval(s) × {intervalDays} day(s) = {schedule.totalDays} days ={' '}
+              {planIntervals} interval(s) × {intervalDays} day(s) = {schedule.totalDays} days ={' '}
               {schedule.durationWeeks} week(s), rounded up
             </p>
             <p className="font-mono text-xs text-slate-600 dark:text-slate-300 mt-1">

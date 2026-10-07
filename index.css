@@ -61,7 +61,8 @@ body {
   /* "Print handout" prints the patient handout and nothing else. */
   html.print-handout header,
   html.print-handout main > div:first-child,
-  html.print-handout main > div:last-child > :not(#patient-handout-card),
+  html.print-handout main > div:last-child > :not(#panel-handout),
+  html.print-handout #panel-handout > :not(#patient-handout-card),
   html.print-handout #patient-handout-card > :not(#patient-handout) {
     display: none !important;
   }

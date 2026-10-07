@@ -41,7 +41,7 @@ const MathsExplainer: React.FC = () => {
     <div className="relative" ref={containerRef}>
       <button
         onClick={() => setIsOpen(open => !open)}
-        className="p-2 text-slate-500 hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400 transition-colors rounded-full hover:bg-slate-100 dark:hover:bg-slate-700"
+        className="p-2 text-slate-500 hover:text-teal-600 dark:text-slate-400 dark:hover:text-teal-400 transition-colors rounded-full hover:bg-slate-100 dark:hover:bg-slate-700"
         aria-label="How the taper is calculated"
         aria-expanded={isOpen}
         aria-haspopup="dialog"
@@ -70,7 +70,7 @@ const MathsExplainer: React.FC = () => {
             </button>
           </div>
 
-          <p className="font-mono text-sm text-blue-700 dark:text-blue-300 bg-slate-50 dark:bg-slate-900 rounded px-3 py-2 mb-3">
+          <p className="font-mono text-sm text-teal-700 dark:text-teal-300 bg-slate-50 dark:bg-slate-900 rounded px-3 py-2 mb-3">
             target(n) = D₀ × (1 − r/100)<sup>n</sup>
           </p>
 
@@ -100,7 +100,7 @@ const MathsExplainer: React.FC = () => {
           <p className="text-sm text-slate-600 dark:text-slate-300 mb-3">
             In <strong className="text-slate-800 dark:text-slate-100">fixed</strong> mode the
             formula is simply{' '}
-            <span className="font-mono text-blue-700 dark:text-blue-300">
+            <span className="font-mono text-teal-700 dark:text-teal-300">
               target(n) = D₀ − n × r
             </span>
             , taking the same amount off every time.

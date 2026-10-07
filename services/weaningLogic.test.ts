@@ -650,3 +650,48 @@ describe('morning and night split', () => {
     expect(result.derivation[0].splitFormula).toBe('AM: 1 x 5mg = 5mg | PM: 1 x 5mg = 5mg');
   });
 });
+
+describe('first reduction on the start date', () => {
+  const onStart = (overrides: Partial<WeanConfig> = {}) => wean({ reduceOnStartDate: true, ...overrides });
+
+  it('takes the first reduction on the start date instead of holding the current dose', () => {
+    const usual = generateSchedule(drug(FINE, { currentDose: 30 }), wean());
+    const result = generateSchedule(drug(FINE, { currentDose: 30 }), onStart());
+    expect(usual.steps[0]).toMatchObject({ date: '2026-07-31', actualDose: 30 });
+    expect(result.steps[0]).toMatchObject({ date: '2026-07-31', dayIndex: 0, actualDose: 27 });
+    expect(result.steps[0].reductionFromPrevious).toBe(3);
+  });
+
+  it('is the usual plan moved one interval earlier, without the current dose', () => {
+    const usual = generateSchedule(drug(FINE, { currentDose: 30 }), wean());
+    const result = generateSchedule(drug(FINE, { currentDose: 30 }), onStart());
+    expect(result.steps.map(s => s.actualDose)).toEqual(usual.steps.slice(1).map(s => s.actualDose));
+    expect(result.totalDays).toBe(usual.totalDays - 14);
+    expect(result.reductionStepCount).toBe(usual.reductionStepCount);
+    expect(result.steps[result.steps.length - 1].date).toBe(result.endDate);
+  });
+
+  it('does not count tablets for the current dose taken before the start date', () => {
+    const usual = generateSchedule(drug(FINE, { currentDose: 30 }), wean());
+    const result = generateSchedule(drug(FINE, { currentDose: 30 }), onStart());
+    const total = (r: typeof usual) => Object.values(r.totalTablets).reduce((a, b) => a + b, 0);
+    expect(total(result)).toBeLessThan(total(usual));
+  });
+
+  it('keeps holding past the start date when the first target is still met by the same dose', () => {
+    // 30mg cannot be made from whole 25mg tablets, so the plan starts at 25mg,
+    // and the first target (27mg) is still met by 25mg: that dose is held on.
+    const tabs: Denomination[] = [{ id: '1', strength: 25, canSplit: 'no' }];
+    const usual = generateSchedule(drug(tabs, { currentDose: 30 }), wean());
+    const result = generateSchedule(drug(tabs, { currentDose: 30 }), onStart());
+    expect(usual.steps[0].durationDays).toBeGreaterThan(14);
+    expect(result.steps[0]).toMatchObject({ date: '2026-07-31', dayIndex: 0, actualDose: 25, reductionFromPrevious: null });
+    expect(result.steps[0].durationDays).toBe(usual.steps[0].durationDays - 14);
+    expect(result.steps[1].dayIndex).toBe(result.steps[0].durationDays);
+  });
+
+  it('starts the ideal curve on the start date', () => {
+    const result = generateSchedule(drug(FINE, { currentDose: 30 }), onStart());
+    expect(result.targetCurve[0]).toEqual({ date: '2026-07-31', dose: 27 });
+  });
+});

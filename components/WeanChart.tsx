@@ -410,9 +410,9 @@ const WeanChart: React.FC<WeanChartProps> = ({
                 // between two values, so the line must be stepped.
                 type="stepAfter"
                 dataKey="dose"
-                stroke="#0ea5e9"
+                stroke="#0d9488"
                 strokeWidth={2}
-                dot={{ r: 3, fill: '#0ea5e9', strokeWidth: 0 }}
+                dot={{ r: 3, fill: '#0d9488', strokeWidth: 0 }}
                 activeDot={{ r: 5 }}
                 name="Prescribed dose"
                 connectNulls

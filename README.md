@@ -6,6 +6,10 @@ HyperTaper is a pure client-side web application designed to assist clinicians i
 
 ## Features
 - **Precise Tapering Algorithms**: Supports both fixed-dose and hyperbolic (percentage-based) reductions.
+- **Start on the Clinic Date**: Choose whether the start date keeps the current dose for one
+  interval (the default) or is the day the first reduction is taken, so the plan's dose changes
+  line up with when the patient is seen without back-dating the start date. Tablets for the
+  current dose already being taken are not counted.
 - **Tablet Splitting Logic**: Automatically calculates fractional pill requirements based on available denominations and safe splitting practices.
 - **Never Overshoots**: Each step uses the largest dose the available tablets can actually make *without exceeding* the taper target, and holds it until the target falls to the next achievable dose.
 - **Morning and Night Doses**: Divide each daily dose into the most even morning and night

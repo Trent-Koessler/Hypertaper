@@ -96,7 +96,7 @@ const PatientHandout: React.FC<PatientHandoutProps> = ({ drugName, unit, steps, 
         </h3>
         <button
           onClick={printHandout}
-          className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-full transition-colors flex items-center gap-2 font-medium"
+          className="text-xs bg-teal-600 hover:bg-teal-700 text-white px-3 py-1.5 rounded-full transition-colors flex items-center gap-2 font-medium"
         >
           <Printer size={14} />
           Print handout
