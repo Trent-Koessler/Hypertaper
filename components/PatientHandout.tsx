@@ -26,7 +26,7 @@ const tabletCount = (count: number): string => {
   return `${whole > 0 ? whole : ''}${FRACTIONS[quarters]}`;
 };
 
-/** ["1½ × 2mg tablets", "¼ × 5mg tablet"], or ["0.6mL of liquid (1mg/mL)"]. */
+/** ["1½ × 2mg tablets", "¼ × 5mg tablet"], or ["0.6mL liquid"]. The liquid's strength is stated once, above the table. */
 const describeForPatient = (
   dose: Pick<DoseBreakdown, 'tablets' | 'liquidMl'>,
   denominations: Denomination[],
@@ -34,7 +34,7 @@ const describeForPatient = (
   liquid?: LiquidConfig
 ): string[] => {
   if (dose.liquidMl && liquid) {
-    return [`${formatAmount(dose.liquidMl)}mL of liquid (${formatAmount(liquid.concentration)}${unit}/mL)`];
+    return [`${formatAmount(dose.liquidMl)}mL liquid`];
   }
   const parts = Object.entries(dose.tablets)
     .filter(([, count]) => count > 0)
@@ -47,19 +47,19 @@ const describeForPatient = (
   return parts.length > 0 ? parts : ['None'];
 };
 
-/** Keeps each amount on one line, so "1 × 2mg tablet" never splits across lines. */
+/** One amount per line, so the dose columns can stay narrow enough for the page. */
 const Amounts: React.FC<{ parts: string[] }> = ({ parts }) => (
   <>
     {parts.map((part, index) => (
-      <React.Fragment key={part}>
-        {index > 0 && ' + '}
-        <span className="whitespace-nowrap">{part}</span>
-      </React.Fragment>
+      <span key={part} className="block">
+        {index > 0 && '+ '}
+        {part}
+      </span>
     ))}
   </>
 );
 
-const longDate = (iso: string) => formatISODate(iso, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+const longDate = (iso: string) => formatISODate(iso, { day: 'numeric', month: 'short', year: 'numeric' });
 
 /**
  * A plain-language copy of the plan for the patient: one row per step, with a
@@ -125,7 +125,12 @@ const PatientHandout: React.FC<PatientHandoutProps> = ({ drugName, unit, steps, 
             {twiceDaily ? ', once in the morning and once at night.' : ', once each day.'}
           </li>
           <li>Tick the box when you start each new row.</li>
-          {usesLiquid && <li>Measure the liquid with an oral syringe from your pharmacy, not a kitchen spoon.</li>}
+          {usesLiquid && liquid && (
+            <li>
+              The liquid is {formatAmount(liquid.concentration)}{unit} in each mL. Measure it with an oral syringe from
+              your pharmacy, not a kitchen spoon.
+            </li>
+          )}
           <li>Do not change your dose or skip ahead without talking to your prescriber.</li>
           <li>
             If withdrawal symptoms become hard to manage, contact your prescriber. The plan can be paused or
@@ -133,8 +138,23 @@ const PatientHandout: React.FC<PatientHandoutProps> = ({ drugName, unit, steps, 
           </li>
         </ul>
 
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-left">
+        {/* Fixed column widths keep the table inside an A4 page, whatever the amounts. */}
+        <div className="overflow-x-auto print:overflow-visible">
+          <table className="w-full table-fixed border-collapse text-left">
+            <colgroup>
+              <col style={{ width: '7%' }} />
+              <col style={{ width: '20%' }} />
+              {twiceDaily ? (
+                <>
+                  <col style={{ width: '22%' }} />
+                  <col style={{ width: '22%' }} />
+                </>
+              ) : (
+                <col style={{ width: '44%' }} />
+              )}
+              <col style={{ width: '15%' }} />
+              <col style={{ width: '14%' }} />
+            </colgroup>
             <thead>
               <tr className="bg-slate-100">
                 <th className={cell}>Step</th>
@@ -148,14 +168,14 @@ const PatientHandout: React.FC<PatientHandoutProps> = ({ drugName, unit, steps, 
                   <th className={cell}>Each day</th>
                 )}
                 <th className={cell}>Total each day</th>
-                <th className={`${cell} text-center`}>Started ✓</th>
+                <th className={`${cell} text-center`}>Started</th>
               </tr>
             </thead>
             <tbody>
               {doseSteps.map((step, index) => (
                 <tr key={step.date}>
                   <td className={cell}>{index + 1}</td>
-                  <td className={`${cell} whitespace-nowrap`}>
+                  <td className={cell}>
                     {longDate(step.date)}
                     <span className="block text-slate-500">to {longDate(addDaysISO(step.date, step.durationDays - 1))}</span>
                   </td>
@@ -167,7 +187,7 @@ const PatientHandout: React.FC<PatientHandoutProps> = ({ drugName, unit, steps, 
                   ) : (
                     <td className={cell}><Amounts parts={describeForPatient(step, denominations, unit, liquid)} /></td>
                   )}
-                  <td className={`${cell} font-semibold whitespace-nowrap`}>{formatAmount(step.actualDose)}{unit}</td>
+                  <td className={`${cell} font-semibold`}>{formatAmount(step.actualDose)}{unit}</td>
                   <td className={`${cell} text-center`}>
                     <span className="inline-block w-5 h-5 border-2 border-slate-500 rounded-sm" aria-label="Tick box" />
                   </td>
@@ -176,7 +196,7 @@ const PatientHandout: React.FC<PatientHandoutProps> = ({ drugName, unit, steps, 
               {isComplete && stopStep && (
                 <tr className="bg-green-50">
                   <td className={cell}>{doseSteps.length + 1}</td>
-                  <td className={`${cell} whitespace-nowrap`}>From {longDate(stopStep.date)}</td>
+                  <td className={cell}>From {longDate(stopStep.date)}</td>
                   <td className={`${cell} font-semibold`} colSpan={twiceDaily ? 3 : 2}>
                     Stop — no more {name}
                   </td>
