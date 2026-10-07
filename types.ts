@@ -5,12 +5,40 @@ export interface Denomination {
   canSplit?: 'no' | 'half' | 'quarter';
 }
 
+/**
+ * An oral liquid (commercial or compounded) used for part or all of the taper.
+ * A liquid can be measured far more finely than a tablet can be cut, which is
+ * what lets the low-dose tail of a hyperbolic taper stay gentle.
+ */
+export interface LiquidConfig {
+  enabled: boolean;
+  /**
+   * 'whole' gives every step as liquid; 'below' only once the target falls below
+   * `switchBelowDose`; 'tolerance' stays on tablets until the next tablet step
+   * would drop by more than `maxTabletDropPercent`, then stays on liquid.
+   */
+  mode: 'whole' | 'below' | 'tolerance';
+  /** Targets strictly below this dose are given as liquid when mode is 'below'. */
+  switchBelowDose: number;
+  /** The largest drop between tablet steps, in percent, before switching to liquid when mode is 'tolerance'. */
+  maxTabletDropPercent: number;
+  /** Dose units per mL, e.g. 1 for a 1mg/mL suspension. */
+  concentration: number;
+  /** The smallest volume that can be measured reliably, e.g. 0.1mL with an oral syringe. */
+  measureIncrementMl: number;
+  /** Volume of one bottle, for counting how many to supply. */
+  bottleSizeMl?: number;
+}
+
 export interface DrugConfig {
   name: string;
   currentDose: number;
-  unit: string; // Strength unit of the solid dose form, e.g. "mg", "mcg"
+  unit: string; // Strength unit of the dose form, e.g. "mg", "mcg"
   startDate: string; // ISO date string
   denominations: Denomination[];
+  liquid?: LiquidConfig;
+  /** 2 divides each daily dose into a morning and a night dose. Absent or 1 means once daily. */
+  dosesPerDay?: 1 | 2;
 }
 
 export interface WeanConfig {
@@ -29,6 +57,20 @@ export interface DosePiece {
   subtotal: number; // pieceCount x strength
 }
 
+/** One administration within a day (e.g. the morning dose) and what it is made of. */
+export interface DoseBreakdown {
+  dose: number;
+  tablets: { [denomId: string]: number }; // Tablet-equivalents of each denomination
+  pieces: DosePiece[];
+  liquidMl?: number;
+}
+
+/** A daily dose divided into a morning and a night dose; any uneven part goes at night. */
+export interface SplitDose {
+  am: DoseBreakdown;
+  pm: DoseBreakdown;
+}
+
 export interface ScheduleStep {
   date: string;
   dayIndex: number;
@@ -37,6 +79,10 @@ export interface ScheduleStep {
   actualDose: number;
   tablets: { [denomId: string]: number }; // Tablet-equivalents of each denomination (0.5 = one half)
   pieces: DosePiece[]; // The same dose broken down into physically takeable pieces
+  /** Daily volume of liquid in mL, when this step is given as liquid. Tablets and pieces are then empty. */
+  liquidMl?: number;
+  /** Present when dosing twice daily. Tablets, pieces and liquidMl above are the daily totals of both. */
+  split?: SplitDose;
   /** Drop from the previously *prescribed* dose. Null on the first step. */
   reductionFromPrevious: number | null;
   /** The same drop as a percentage of the previously prescribed dose. */
@@ -57,6 +103,8 @@ export interface DerivationEntry {
   targetFormula: string; // e.g. "50 x (1 - 0.10)^3 = 36.45mg"
   actualDose: number;
   actualFormula: string; // e.g. "1 x 25mg + 1 x 5mg = 30mg"
+  /** "AM: ... | PM: ..." when dosing twice daily. */
+  splitFormula?: string;
   pieces: DosePiece[];
   shortfall: number; // targetDose - actualDose
   startsNewStep: boolean; // False while the previous dose is still being held
@@ -83,6 +131,8 @@ export interface ScheduleResult {
   targetCurve: { date: string; dose: number }[];
   derivation: DerivationEntry[];
   totalTablets: { [denomId: string]: number };
+  /** Total volume of liquid in mL across the whole plan; 0 when no step uses liquid. */
+  totalLiquidMl: number;
   startingDose: number; // The dose the curve is measured against
   totalDays: number;
   durationWeeks: number;

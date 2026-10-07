@@ -8,6 +8,16 @@ HyperTaper is a pure client-side web application designed to assist clinicians i
 - **Precise Tapering Algorithms**: Supports both fixed-dose and hyperbolic (percentage-based) reductions.
 - **Tablet Splitting Logic**: Automatically calculates fractional pill requirements based on available denominations and safe splitting practices.
 - **Never Overshoots**: Each step uses the largest dose the available tablets can actually make *without exceeding* the taper target, and holds it until the target falls to the next achievable dose.
+- **Morning and Night Doses**: Divide each daily dose into the most even morning and night
+  doses the tablet pieces (or liquid measures) allow, with any uneven part at night, as in the
+  Maudsley tables. Each dose time lists its own tablets, and the plan warns when a dose cannot
+  be shared evenly. The split never changes the daily total.
+- **Liquid Formulations**: Optionally give the whole taper, the doses below a chosen level, or
+  everything after the first tablet step that would drop by more than a chosen tolerance
+  (e.g. 15%), as an oral liquid. Liquid totals include the number of bottles to supply. Enter the concentration (e.g. 1mg/mL) and the smallest volume that
+  can be measured (e.g. 0.1mL); each liquid dose is rounded *down* to whole measures. This keeps
+  the low-dose tail gentle where quartered tablets would force a large final drop, and the
+  plan never steps up when it switches from tablets to liquid.
 - **Honest Warnings**: Flags when the available strengths are too coarse for the requested reduction, when a step drops far more steeply than asked for, or when the taper cannot reach the chosen stop dose.
 - **Show the Calculations**: Every plan can be expanded into an interval-by-interval derivation — the formula for each target, the pieces that make up each prescribed dose, the shortfall against the curve, and the realised reduction — so a clinician can check the arithmetic independently. Copyable as plain text.
 - **Configurable Chart**: Restrict the plotted date range, switch the x-axis between days, taper weeks and months, plot dose or percentage of the starting dose, and switch to a logarithmic y-axis (on which a constant-percentage taper is a straight line, making any departure from the intended curve obvious).
@@ -16,6 +26,12 @@ HyperTaper is a pure client-side web application designed to assist clinicians i
   reference — receptor occupancy, AM/PM split, total daily dose and dose form for every
   step. Any of them can seed the calculator's starting dose and tablet strengths, or be
   overlaid on the chart to compare a generated plan against the published guidance.
+- **Supply Counts**: Tablet totals show both the exact amount taken (which can include cut
+  pieces) and the whole tablets to supply, rounded up, for each step and for the whole plan.
+- **Patient Handout**: A plain-language, printable copy of the plan with one row per step —
+  dates, morning and night amounts (e.g. "1½ × 2mg tablets", "0.6mL of liquid"), the total
+  each day and a tick box. Name and contact details are blank lines to fill in by hand, so no
+  patient information is entered into the app. "Print handout" prints the handout alone.
 - **EMR Integration**: One-click copy of a fixed-width plain-text plan for pasting directly into clinical notes.
 - **Secure & Private**: 100% client-side logic. No patient data is sent to external servers!!!
 
@@ -38,19 +54,18 @@ HyperTaper is a pure client-side web application designed to assist clinicians i
 
 ### Known limitations
 
-- **Solid dose forms only.** Hyperbolic tapering to very low doses generally
-  needs a liquid or compounded formulation; with tablets alone the tail of the
-  curve is limited by the smallest piece available, and the app warns when this
-  forces a step steeper than requested. Support for continuous formulations is
-  the most significant outstanding feature.
+- **Liquids are idealised.** A liquid dose is assumed to be measured exactly to
+  the stated increment. The concentration of a compounded liquid should be
+  confirmed with the dispensing pharmacy, and its shelf life may mean the total
+  volume needs to be supplied in several batches.
 - **Dose, not receptor occupancy.** The percentage mode reduces the *dose* by a
   fixed proportion. This is the practical approximation the Maudsley guidance
   works with; it is not the same as reducing receptor occupancy linearly, which
   would need drug-specific occupancy parameters.
 - **Splitting is assumed exact.** Real halves and quarters vary by roughly
   10–20% of the intended piece, which matters most at the smallest doses.
-- **Total daily dose only.** How the dose is divided across the day is a
-  separate clinical decision and is not modelled.
+- **At most twice daily.** Doses can be given once daily or morning and night;
+  three or more doses a day are not modelled.
 
 ## Development
 
