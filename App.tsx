@@ -48,6 +48,10 @@ const readStoredTheme = (): boolean => {
 /** Formats a tablet count, hiding the decimals on whole numbers. */
 const formatCount = (count: number): string => count.toFixed(count % 1 === 0 ? 0 : 2);
 
+/** Whole tablets to supply for a count that may include cut pieces. */
+const supplyCount = (count: number): number => Math.ceil(count - 1e-9);
+
+
 /** Rounds a dose for display without leaving trailing zeros (12.5 not 12.5000). */
 const formatDose = (value: number, decimals = 2): string =>
   String(parseFloat(value.toFixed(decimals)));
@@ -58,7 +62,8 @@ const describeTablets = (
   denominations: Denomination[],
   unit: string,
   multiplier = 1,
-  liquid?: LiquidConfig
+  liquid?: LiquidConfig,
+  showSupply = false
 ): string =>
   dose.liquidMl && liquid
     ? `${formatDose(dose.liquidMl * multiplier, 3)}mL of ${formatDose(liquid.concentration, 3)}${unit}/mL liquid`
@@ -66,7 +71,10 @@ const describeTablets = (
     .filter(([, count]) => count > 0)
     .map(([id, count]) => {
       const denom = denominations.find(d => d.id === id);
-      return denom ? `${formatCount(count * multiplier)}x ${denom.strength}${unit}` : '';
+      const total = count * multiplier;
+      if (!denom) return '';
+      const supply = showSupply && supplyCount(total) !== total ? ` (supply ${supplyCount(total)})` : '';
+      return `${formatCount(total)}x ${denom.strength}${unit}${supply}`;
     })
     .filter(Boolean)
     .join(', ') || 'none';
@@ -91,12 +99,12 @@ const App: React.FC = () => {
       { id: '1', strength: 5, canSplit: 'quarter' },
       { id: '2', strength: 2, canSplit: 'quarter' }
     ],
-    // Off by default. In Australia an oral diazepam liquid is usually compounded,
-    // so the concentration is whatever the pharmacy makes up.
+    // Off by default. Diazepam Elixir is 1mg/mL in Australia.
     liquid: {
       enabled: false,
       mode: 'below',
       switchBelowDose: 2,
+      maxTabletDropPercent: 15,
       concentration: 1,
       measureIncrementMl: 0.1
     },
@@ -221,7 +229,11 @@ const App: React.FC = () => {
     text += `Dosing: ${twiceDaily ? 'twice daily (morning and night)' : 'once daily'}\n`;
     if (liquidOn) {
       text += `Liquid: ${liquid!.concentration}${drug.unit}/mL, measured to ${liquid!.measureIncrementMl}mL, `
-        + (liquidOnly ? `for the whole taper\n` : `for doses below ${liquid!.switchBelowDose}${drug.unit}\n`);
+        + (liquidOnly
+          ? `for the whole taper\n`
+          : liquid!.mode === 'tolerance'
+            ? `once a tablet step would drop by more than ${liquid!.maxTabletDropPercent}%\n`
+            : `for doses below ${liquid!.switchBelowDose}${drug.unit}\n`);
     }
     text += `\n`;
 
@@ -237,7 +249,7 @@ const App: React.FC = () => {
         return;
       }
 
-      const stepTotal = describeTablets(step, drug.denominations, drug.unit, step.durationDays, liquid);
+      const stepTotal = describeTablets(step, drug.denominations, drug.unit, step.durationDays, liquid, true);
       const timing = step.split
         ? `Morning ${formatDose(step.split.am.dose, 3)}${drug.unit} (${describeTablets(step.split.am, drug.denominations, drug.unit, 1, liquid)}), `
           + `Night ${formatDose(step.split.pm.dose, 3)}${drug.unit} (${describeTablets(step.split.pm, drug.denominations, drug.unit, 1, liquid)})`
@@ -259,7 +271,8 @@ const App: React.FC = () => {
     Object.entries(schedule.totalTablets).forEach(([id, count]: [string, number]) => {
       const denom = drug.denominations.find(d => d.id === id);
       if (denom) {
-        text += `- ${formatCount(count)}x ${denom.strength}${drug.unit} tablets\n`;
+        text += `- ${formatCount(count)}x ${denom.strength}${drug.unit} tablets taken`
+          + (supplyCount(count) !== count ? ` (supply ${supplyCount(count)} whole tablets)` : '') + `\n`;
       }
     });
     if (schedule.totalLiquidMl > 0 && liquid) {
@@ -501,7 +514,7 @@ const App: React.FC = () => {
                   {liquid.enabled && (
                     <div className="mt-3 space-y-3 bg-sky-50/60 dark:bg-sky-900/10 p-3 rounded-lg border border-sky-100 dark:border-sky-900/40">
                       <div className="flex bg-white dark:bg-slate-700 p-1 rounded-lg border border-slate-200 dark:border-slate-600" role="radiogroup" aria-label="When to use the liquid">
-                        {([['below', 'Below a dose'], ['whole', 'Whole taper']] as const).map(([mode, label]) => (
+                        {([['below', 'Below a dose'], ['tolerance', 'By drop size'], ['whole', 'Whole taper']] as const).map(([mode, label]) => (
                           <button
                             key={mode}
                             role="radio"
@@ -513,6 +526,27 @@ const App: React.FC = () => {
                           </button>
                         ))}
                       </div>
+
+                      {liquid.mode === 'tolerance' && (
+                        <div>
+                          <label htmlFor="liquid-tolerance" className="block text-xs font-medium text-slate-500 dark:text-slate-400 uppercase mb-1">Switch when a tablet drop exceeds</label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              id="liquid-tolerance"
+                              type="number"
+                              min="0"
+                              step="any"
+                              value={liquid.maxTabletDropPercent}
+                              onChange={e => updateLiquid('maxTabletDropPercent', Number(e.target.value))}
+                              className="w-full px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded text-sm bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-100"
+                            />
+                            <span className="text-sm text-slate-400 w-10">%</span>
+                          </div>
+                          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                            Tablets are used until the next tablet step would cut the dose by more than this, then liquid for the rest of the taper.
+                          </p>
+                        </div>
+                      )}
 
                       {liquid.mode === 'below' && (
                         <div>
@@ -866,7 +900,7 @@ const App: React.FC = () => {
                             )}
                             {!step.isStop && (
                               <div className="mt-2 text-[11px] text-slate-500 dark:text-slate-400 border-t border-slate-100 dark:border-slate-700/50 pt-2 font-medium">
-                                Step Total: {describeTablets(step, drug.denominations, drug.unit, step.durationDays, liquid)}
+                                Step Total: {describeTablets(step, drug.denominations, drug.unit, step.durationDays, liquid, true)}
                               </div>
                             )}
                           </td>
@@ -897,7 +931,12 @@ const App: React.FC = () => {
                              {denom.strength}{drug.unit}
                            </div>
                            <div className="text-slate-600 dark:text-slate-300 font-medium">
-                             {formatCount(count)} <span className="text-xs text-slate-400 font-normal">tablets</span>
+                             {formatCount(count)} <span className="text-xs text-slate-400 font-normal">tablets taken</span>
+                             {supplyCount(count) !== count && (
+                               <span className="block text-xs text-slate-500 dark:text-slate-400 font-normal">
+                                 supply {supplyCount(count)} whole tablets
+                               </span>
+                             )}
                            </div>
                         </div>
                       );

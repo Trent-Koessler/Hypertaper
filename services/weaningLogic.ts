@@ -240,7 +240,9 @@ export function liquidDoseIncrement(liquid: LiquidConfig): number {
 /** Whether a step aiming at `targetDose` is given as liquid rather than tablets. */
 export function usesLiquid(liquid: LiquidConfig | undefined, targetDose: number): boolean {
   if (!liquid?.enabled) return false;
-  return liquid.mode === 'whole' || targetDose < liquid.switchBelowDose - EPSILON;
+  if (liquid.mode === 'whole') return true;
+  // Tolerance mode decides as the taper unfolds, not from the target alone.
+  return liquid.mode === 'below' && targetDose < liquid.switchBelowDose - EPSILON;
 }
 
 /**
@@ -337,6 +339,10 @@ function validate(drug: DrugConfig, wean: WeanConfig, warnings: string[]): boole
       warnings.push('Enter the dose below which the taper switches to liquid, greater than zero.');
       usable = false;
     }
+    if (liquid.mode === 'tolerance' && (!Number.isFinite(liquid.maxTabletDropPercent) || liquid.maxTabletDropPercent <= 0)) {
+      warnings.push('Enter the largest tablet drop to allow before switching to liquid, greater than zero percent.');
+      usable = false;
+    }
   }
 
   // A liquid-only taper needs no tablets; any taper that starts on tablets does.
@@ -411,19 +417,32 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
   const holds: { target: number; combination: TabletCombination }[] = [];
   let iteration = 0;
   let endReason: ScheduleEndReason = 'reached-stop-dose';
+  let onLiquid = false;
 
   while (iteration < MAX_ITERATIONS) {
     const target = targetAtInterval(startingDose, wean, iteration);
     if (target <= EPSILON || target < threshold - EPSILON) break;
 
-    let combination = usesLiquid(drug.liquid, target)
+    const previousHold = holds[holds.length - 1];
+    let combination = onLiquid || usesLiquid(drug.liquid, target)
       ? findLiquidDose(target, drug.liquid!, splitDaily)
       : findBestTabletCombination(target, drug.denominations, splitDaily);
+
+    // In tolerance mode, the first tablet step that would drop by more than the
+    // clinician's tolerance (or that the tablets cannot make at all) is given as
+    // liquid instead, and the rest of the taper stays on liquid.
+    if (!onLiquid && previousHold && drug.liquid?.enabled && drug.liquid.mode === 'tolerance' && !combination.liquidMl) {
+      const previousDose = previousHold.combination.actualDose;
+      const drop = ((previousDose - combination.actualDose) / previousDose) * 100;
+      if (combination.actualDose <= 0 || drop > drug.liquid.maxTabletDropPercent + EPSILON) {
+        onLiquid = true;
+        combination = findLiquidDose(target, drug.liquid, splitDaily);
+      }
+    }
 
     // Changing formulation can land above the previous dose: tablets may have
     // fallen well short of an earlier target that the finer liquid now tracks
     // closely. A taper must never step up, so hold the previous dose instead.
-    const previousHold = holds[holds.length - 1];
     if (previousHold && combination.actualDose > previousHold.combination.actualDose + EPSILON) {
       combination = previousHold.combination;
     }

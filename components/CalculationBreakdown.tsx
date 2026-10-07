@@ -10,6 +10,12 @@ interface CalculationBreakdownProps {
 
 const num = (value: number, decimals = 4): string => String(parseFloat(value.toFixed(decimals)));
 
+/** " (supply 18 whole tablets)" when a total includes part tablets. */
+const supplyNote = (total: number): string => {
+  const whole = Math.ceil(total - 1e-9);
+  return whole === total ? '' : ` (supply ${whole} whole tablets)`;
+};
+
 const END_REASON_TEXT: Record<ScheduleResult['endReason'], string> = {
   'reached-stop-dose':
     'The ideal curve reached the stop dose, so cessation is the intended end of the plan.',
@@ -35,7 +41,7 @@ const CalculationBreakdown: React.FC<CalculationBreakdownProps> = ({ drug, wean,
 
     return [
       `1. Ideal curve. Interval n falls on day n x ${intervalDays}, and asks for ${curve}. Each target is computed from the original dose, not from the previously prescribed one, so tablet rounding at one step never compounds into the rest of the curve.`,
-      `2. Achievable dose. For each target, the engine searches every combination of the available pieces and takes the largest total that does not exceed the target. It never rounds up, so no step can prescribe more than the curve asks for.${liquid ? ` ${liquid.mode === 'whole' ? 'Every target' : `A target below ${num(liquid.switchBelowDose)}${unit}`} is given as liquid instead: the largest whole number of ${num(liquid.measureIncrementMl)}mL measures (${num(liquidIncrement)}${unit} each at ${num(liquid.concentration)}${unit}/mL) that does not exceed the target. If changing formulation would raise the dose above the previous step, the previous dose is held instead.` : ''}`,
+      `2. Achievable dose. For each target, the engine searches every combination of the available pieces and takes the largest total that does not exceed the target. It never rounds up, so no step can prescribe more than the curve asks for.${liquid ? ` ${liquid.mode === 'whole' ? 'Every target' : liquid.mode === 'tolerance' ? `Once the next tablet step would drop by more than ${num(liquid.maxTabletDropPercent)}% (or no smaller tablet dose exists), that and every later target` : `A target below ${num(liquid.switchBelowDose)}${unit}`} is given as liquid instead: the largest whole number of ${num(liquid.measureIncrementMl)}mL measures (${num(liquidIncrement)}${unit} each at ${num(liquid.concentration)}${unit}/mL) that does not exceed the target. If changing formulation would raise the dose above the previous step, the previous dose is held instead.` : ''}`,
       `3. Holding. When two consecutive intervals resolve to the same achievable dose, they are merged into one held step. The dose is held until the curve falls far enough to justify the next achievable dose down.`,
       `4. Stopping. Intervals are generated while target(n) is at or above the stop dose of ${num(wean.minimumDoseThreshold)}${unit}, so the stop dose itself is prescribed before cessation.`,
       `5. Preference. Among combinations that reach the same dose, the engine prefers the fewest pieces, and then the fewest cut tablets.`,
@@ -94,7 +100,7 @@ const CalculationBreakdown: React.FC<CalculationBreakdownProps> = ({ drug, wean,
       });
     if (liquid) {
       lines.push(
-        `  Liquid: ${num(liquid.concentration)}${unit}/mL, measured to ${num(liquid.measureIncrementMl)}mL (${num(liquidIncrement)}${unit}), ${liquid.mode === 'whole' ? 'for the whole taper' : `for targets below ${num(liquid.switchBelowDose)}${unit}`}`
+        `  Liquid: ${num(liquid.concentration)}${unit}/mL, measured to ${num(liquid.measureIncrementMl)}mL (${num(liquidIncrement)}${unit}), ${liquid.mode === 'whole' ? 'for the whole taper' : liquid.mode === 'tolerance' ? `once a tablet step would drop by more than ${num(liquid.maxTabletDropPercent)}%` : `for targets below ${num(liquid.switchBelowDose)}${unit}`}`
       );
     }
     lines.push('');
@@ -124,7 +130,7 @@ const CalculationBreakdown: React.FC<CalculationBreakdownProps> = ({ drug, wean,
     lines.push('');
     lines.push('TOTAL TABLETS (daily count x days held, summed over steps)');
     totalsRows.forEach(row => {
-      lines.push(`  ${num(row.strength)}${unit}: ${row.terms.join(' + ')} = ${num(row.total)} tablets`);
+      lines.push(`  ${num(row.strength)}${unit}: ${row.terms.join(' + ')} = ${num(row.total)} tablets${supplyNote(row.total)}`);
     });
     if (schedule.totalLiquidMl > 0) lines.push(`  Liquid: ${liquidTerms.join(' + ')} = ${num(schedule.totalLiquidMl)}mL`);
     lines.push('');
@@ -289,7 +295,7 @@ const CalculationBreakdown: React.FC<CalculationBreakdownProps> = ({ drug, wean,
             <ul className="space-y-1 font-mono text-xs text-slate-600 dark:text-slate-300">
               {totalsRows.map(row => (
                 <li key={row.strength}>
-                  {num(row.strength)}{unit}: {row.terms.join(' + ')} = <strong>{num(row.total)}</strong> tablets
+                  {num(row.strength)}{unit}: {row.terms.join(' + ')} = <strong>{num(row.total)}</strong> tablets{supplyNote(row.total)}
                 </li>
               ))}
               {schedule.totalLiquidMl > 0 && (

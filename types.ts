@@ -12,10 +12,16 @@ export interface Denomination {
  */
 export interface LiquidConfig {
   enabled: boolean;
-  /** 'whole' gives every step as liquid; 'below' only once the target falls below `switchBelowDose`. */
-  mode: 'whole' | 'below';
+  /**
+   * 'whole' gives every step as liquid; 'below' only once the target falls below
+   * `switchBelowDose`; 'tolerance' stays on tablets until the next tablet step
+   * would drop by more than `maxTabletDropPercent`, then stays on liquid.
+   */
+  mode: 'whole' | 'below' | 'tolerance';
   /** Targets strictly below this dose are given as liquid when mode is 'below'. */
   switchBelowDose: number;
+  /** The largest drop between tablet steps, in percent, before switching to liquid when mode is 'tolerance'. */
+  maxTabletDropPercent: number;
   /** Dose units per mL, e.g. 1 for a 1mg/mL suspension. */
   concentration: number;
   /** The smallest volume that can be measured reliably, e.g. 0.1mL with an oral syringe. */

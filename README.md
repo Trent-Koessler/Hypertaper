@@ -12,8 +12,9 @@ HyperTaper is a pure client-side web application designed to assist clinicians i
   doses the tablet pieces (or liquid measures) allow, with any uneven part at night, as in the
   Maudsley tables. Each dose time lists its own tablets, and the plan warns when a dose cannot
   be shared evenly. The split never changes the daily total.
-- **Liquid Formulations**: Optionally give the whole taper, or just the doses below a chosen
-  level, as an oral liquid. Enter the concentration (e.g. 1mg/mL) and the smallest volume that
+- **Liquid Formulations**: Optionally give the whole taper, the doses below a chosen level, or
+  everything after the first tablet step that would drop by more than a chosen tolerance
+  (e.g. 15%), as an oral liquid. Enter the concentration (e.g. 1mg/mL) and the smallest volume that
   can be measured (e.g. 0.1mL); each liquid dose is rounded *down* to whole measures. This keeps
   the low-dose tail gentle where quartered tablets would force a large final drop, and the
   plan never steps up when it switches from tablets to liquid.
@@ -25,6 +26,8 @@ HyperTaper is a pure client-side web application designed to assist clinicians i
   reference — receptor occupancy, AM/PM split, total daily dose and dose form for every
   step. Any of them can seed the calculator's starting dose and tablet strengths, or be
   overlaid on the chart to compare a generated plan against the published guidance.
+- **Supply Counts**: Tablet totals show both the exact amount taken (which can include cut
+  pieces) and the whole tablets to supply, rounded up, for each step and for the whole plan.
 - **EMR Integration**: One-click copy of a fixed-width plain-text plan for pasting directly into clinical notes.
 - **Secure & Private**: 100% client-side logic. No patient data is sent to external servers!!!
 
