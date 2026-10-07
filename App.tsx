@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Pill, Calculator, Calendar, Activity, Info, AlertCircle, AlertTriangle, Plus, Trash2, Printer, Scissors, Sun, Moon, Copy, Check, Droplet } from 'lucide-react';
+import { Pill, Calculator, Calendar, Info, AlertCircle, AlertTriangle, Plus, Trash2, Printer, Scissors, Sun, Moon, Copy, Check, Droplet } from 'lucide-react';
 import { DrugConfig, WeanConfig, Denomination, ScheduleStep, LiquidConfig, DoseBreakdown } from './types';
 import { generateSchedule } from './services/weaningLogic';
 import { formatISODate, todayISO } from './services/dateUtils';
@@ -9,6 +9,7 @@ import CalculationBreakdown from './components/CalculationBreakdown';
 import MathsExplainer from './components/MathsExplainer';
 import MaudsleyReference from './components/MaudsleyReference';
 import PatientHandout from './components/PatientHandout';
+import AppIcon from './components/AppIcon';
 import {
   MAUDSLEY_TABLET_STRENGTHS,
   MaudsleyRegimen,
@@ -29,6 +30,15 @@ const COMMON_DRUGS = [
   "Gabapentin",
   "Pregabalin",
   "Other"
+];
+
+type ResultTab = 'chart' | 'schedule' | 'handout' | 'maudsley';
+
+const RESULT_TABS: { id: ResultTab; label: string }[] = [
+  { id: 'chart', label: 'Chart' },
+  { id: 'schedule', label: 'Schedule' },
+  { id: 'handout', label: 'Patient handout' },
+  { id: 'maudsley', label: 'Maudsley' }
 ];
 
 const createId = (): string =>
@@ -127,6 +137,11 @@ const App: React.FC = () => {
 
   const [isCustomDrug, setIsCustomDrug] = useState(false);
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const [activeTab, setActiveTab] = useState<ResultTab>('chart');
+
+  /** Inactive panels are hidden on screen only, so printing still includes them. */
+  const panelClass = (tab: ResultTab): string =>
+    activeTab === tab ? 'space-y-6' : 'hidden print:block space-y-6';
   const [isDarkMode, setIsDarkMode] = useState(readStoredTheme);
   /** Published regimen drawn on the chart for comparison, by id, or null for none. */
   const [overlaidRegimenId, setOverlaidRegimenId] = useState<string | null>(null);
@@ -175,6 +190,8 @@ const App: React.FC = () => {
   };
 
   const toggleMaudsleyOverlay = (regimen: MaudsleyRegimen) => {
+    // Turning the overlay on jumps to the chart, where the comparison is drawn.
+    if (overlaidRegimenId !== regimen.id) setActiveTab('chart');
     setOverlaidRegimenId(current => (current === regimen.id ? null : regimen.id));
   };
 
@@ -317,26 +334,24 @@ const App: React.FC = () => {
       {/* Header */}
       <header className="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 sticky top-0 z-50 transition-colors duration-200 print:hidden">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="bg-blue-600 p-2 rounded-lg">
-              <Activity className="text-white w-6 h-6" />
-            </div>
-            <h1 className="text-xl font-bold bg-gradient-to-r from-blue-700 to-cyan-600 bg-clip-text text-transparent">
-              HyperTaper
+          <div className="flex items-center gap-2.5">
+            <AppIcon className="w-9 h-9" />
+            <h1 className="text-xl font-bold tracking-tight text-teal-900 dark:text-teal-50">
+              Hyper<span className="text-teal-600 dark:text-teal-400">Taper</span>
             </h1>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-1 sm:gap-4">
             <MathsExplainer />
             <button
               onClick={() => setIsDarkMode(!isDarkMode)}
-              className="p-2 text-slate-500 hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400 transition-colors rounded-full hover:bg-slate-100 dark:hover:bg-slate-700"
+              className="p-2 text-slate-500 hover:text-teal-600 dark:text-slate-400 dark:hover:text-teal-400 transition-colors rounded-full hover:bg-slate-100 dark:hover:bg-slate-700"
               aria-label={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
             >
               {isDarkMode ? <Sun size={20} /> : <Moon size={20} />}
             </button>
-            <button onClick={printSchedule} className="flex items-center gap-2 text-sm font-medium text-slate-500 hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400 transition-colors">
-              <Printer size={18} />
-              <span>Print Plan</span>
+            <button onClick={printSchedule} className="flex items-center gap-2 text-sm font-medium bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white px-3 sm:px-3.5 py-2 rounded-lg shadow-sm transition-colors whitespace-nowrap" aria-label="Print plan">
+              <Printer size={16} />
+              <span className="hidden sm:inline">Print plan</span>
             </button>
           </div>
         </div>
@@ -349,7 +364,7 @@ const App: React.FC = () => {
 
           {/* Drug Details Card */}
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 p-6 transition-colors duration-200">
-            <div className="flex items-center gap-2 mb-4 text-blue-800 dark:text-blue-400">
+            <div className="flex items-center gap-2 mb-4 text-teal-800 dark:text-teal-400">
               <Pill className="w-5 h-5" />
               <h2 className="font-semibold text-lg">Medication Details</h2>
             </div>
@@ -362,7 +377,7 @@ const App: React.FC = () => {
                     id="drug-name"
                     value={COMMON_DRUGS.includes(drug.name) ? drug.name : 'Other'}
                     onChange={handleDrugChange}
-                    className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-100"
+                    className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-100"
                   >
                     {COMMON_DRUGS.map(d => (
                       <option key={d} value={d}>{d}</option>
@@ -377,11 +392,11 @@ const App: React.FC = () => {
                       placeholder="Enter drug name"
                       autoFocus
                       onChange={e => setDrug({...drug, name: e.target.value})}
-                      className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-100"
+                      className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-100"
                     />
                     <button
                       onClick={() => setIsCustomDrug(false)}
-                      className="text-xs text-blue-600 dark:text-blue-400 hover:underline whitespace-nowrap px-2"
+                      className="text-xs text-teal-600 dark:text-teal-400 hover:underline whitespace-nowrap px-2"
                     >
                       Back to list
                     </button>
@@ -399,7 +414,7 @@ const App: React.FC = () => {
                     step="any"
                     value={drug.currentDose}
                     onChange={e => setDrug({...drug, currentDose: Number(e.target.value)})}
-                    className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-100"
+                    className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-100"
                   />
                 </div>
                 <div>
@@ -442,7 +457,7 @@ const App: React.FC = () => {
                       role="radio"
                       aria-checked={(drug.dosesPerDay ?? 1) === count}
                       onClick={() => setDrug(prev => ({ ...prev, dosesPerDay: count }))}
-                      className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-all ${(drug.dosesPerDay ?? 1) === count ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+                      className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-all ${(drug.dosesPerDay ?? 1) === count ? 'bg-white dark:bg-slate-800 text-teal-600 dark:text-teal-400 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
                     >
                       {label}
                     </button>
@@ -453,7 +468,7 @@ const App: React.FC = () => {
               <div>
                 <div className="flex justify-between items-center mb-2">
                   <span className="block text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Available Denominations</span>
-                  <button onClick={addDenom} aria-label="Add a tablet strength" className="text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-slate-700 p-1 rounded transition-colors">
+                  <button onClick={addDenom} aria-label="Add a tablet strength" className="text-teal-600 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-slate-700 p-1 rounded transition-colors">
                     <Plus size={16} />
                   </button>
                 </div>
@@ -513,7 +528,7 @@ const App: React.FC = () => {
                       type="checkbox"
                       checked={liquid.enabled}
                       onChange={e => updateLiquid('enabled', e.target.checked)}
-                      className="w-4 h-4 accent-blue-600"
+                      className="w-4 h-4 accent-teal-600"
                     />
                     <Droplet size={14} className="text-sky-500" />
                     <span className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Use a liquid formulation</span>
@@ -639,7 +654,7 @@ const App: React.FC = () => {
 
           {/* Taper Configuration Card */}
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 p-6 transition-colors duration-200">
-            <div className="flex items-center gap-2 mb-4 text-indigo-800 dark:text-indigo-400">
+            <div className="flex items-center gap-2 mb-4 text-teal-800 dark:text-teal-400">
               <Calculator className="w-5 h-5" />
               <h2 className="font-semibold text-lg">Taper Settings</h2>
             </div>
@@ -652,7 +667,7 @@ const App: React.FC = () => {
                     role="radio"
                     aria-checked={wean.reductionType === 'percentage'}
                     onClick={() => setWean({...wean, reductionType: 'percentage'})}
-                    className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-all ${wean.reductionType === 'percentage' ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+                    className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-all ${wean.reductionType === 'percentage' ? 'bg-white dark:bg-slate-800 text-teal-600 dark:text-teal-400 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
                   >
                     Hyperbolic (%)
                   </button>
@@ -660,7 +675,7 @@ const App: React.FC = () => {
                     role="radio"
                     aria-checked={wean.reductionType === 'fixed'}
                     onClick={() => setWean({...wean, reductionType: 'fixed'})}
-                    className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-all ${wean.reductionType === 'fixed' ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+                    className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-all ${wean.reductionType === 'fixed' ? 'bg-white dark:bg-slate-800 text-teal-600 dark:text-teal-400 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
                   >
                     Fixed Amount
                   </button>
@@ -679,7 +694,7 @@ const App: React.FC = () => {
                       step="any"
                       value={wean.reductionValue}
                       onChange={e => setWean({...wean, reductionValue: Number(e.target.value)})}
-                      className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-100"
+                      className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-100"
                     />
                   </div>
                   <div>
@@ -706,7 +721,7 @@ const App: React.FC = () => {
                      step="0.1"
                      value={wean.minimumDoseThreshold}
                      onChange={e => setWean({...wean, minimumDoseThreshold: Number(e.target.value)})}
-                     className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-100"
+                     className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-100"
                    />
                    <span className="text-sm text-slate-400">{drug.unit}</span>
                  </div>
@@ -774,223 +789,248 @@ const App: React.FC = () => {
                  </div>
                  {/* The dose the patient steps off from is the clinically risky
                      number, and it is not always the requested stop dose. */}
-                 <div className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col justify-center transition-colors duration-200">
-                    <span className="text-slate-400 dark:text-slate-500 text-xs font-semibold uppercase">
+                 <div className="bg-teal-50 dark:bg-teal-900/30 p-4 rounded-xl border border-teal-200 dark:border-teal-800 shadow-sm flex flex-col justify-center transition-colors duration-200">
+                    <span className="text-teal-700 dark:text-teal-300 text-xs font-semibold uppercase">
                       {schedule.endReason === 'truncated' ? 'Lowest Dose Reached' : 'Ceases From'}
                     </span>
                     <div className="flex items-baseline gap-1">
-                      <span className="text-2xl font-bold text-slate-800 dark:text-slate-100">
+                      <span className="text-2xl font-bold text-teal-900 dark:text-teal-50">
                         {formatDose(finalDose, 3)}{drug.unit}
                       </span>
-                      <span className="text-sm text-slate-500 dark:text-slate-400">
+                      <span className="text-sm text-teal-700 dark:text-teal-300">
                         ({formatDose((finalDose / schedule.startingDose) * 100, 1)}% of start)
                       </span>
                     </div>
                  </div>
               </div>
 
-              {/* Chart */}
-              <WeanChart
-                steps={schedule.steps}
-                targetCurve={schedule.targetCurve}
-                unit={drug.unit}
-                startingDose={schedule.startingDose}
-                startDate={schedule.steps[0].date}
-                endDate={schedule.endDate}
-                isDarkMode={isDarkMode}
-                reference={referenceCurve}
-              />
+              {/* Tabs keep the page short. Inactive panels stay in the page and
+                  are only hidden on screen, so "Print plan" still prints them. */}
+              <div role="tablist" aria-label="Plan views" className="flex flex-wrap gap-1 p-1 bg-slate-200/70 dark:bg-slate-800 rounded-xl w-fit print:hidden">
+                {RESULT_TABS.map(tab => (
+                  <button
+                    key={tab.id}
+                    id={`tab-${tab.id}`}
+                    role="tab"
+                    aria-selected={activeTab === tab.id}
+                    aria-controls={`panel-${tab.id}`}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`px-4 py-1.5 text-sm rounded-lg transition-colors ${activeTab === tab.id ? 'bg-white dark:bg-slate-700 text-teal-700 dark:text-teal-300 font-semibold shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'}`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
 
-              <CalculationBreakdown drug={drug} wean={wean} schedule={schedule} />
+              <div role="tabpanel" id="panel-chart" aria-labelledby="tab-chart" className={panelClass('chart')}>
+                {/* Chart */}
+                <WeanChart
+                  steps={schedule.steps}
+                  targetCurve={schedule.targetCurve}
+                  unit={drug.unit}
+                  startingDose={schedule.startingDose}
+                  startDate={schedule.steps[0].date}
+                  endDate={schedule.endDate}
+                  isDarkMode={isDarkMode}
+                  reference={referenceCurve}
+                />
 
-              <MaudsleyReference
-                onLoadRegimen={loadMaudsleyRegimen}
-                overlaidRegimenId={overlaidRegimenId}
-                onToggleOverlay={toggleMaudsleyOverlay}
-              />
+                <CalculationBreakdown drug={drug} wean={wean} schedule={schedule} />
+              </div>
 
-              {/* EMR Friendly Text */}
-              <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 p-6 transition-colors duration-200 print:hidden">
-                <div className="flex justify-between items-center mb-4">
-                   <h3 className="font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-2">
-                     <Copy className="w-4 h-4" />
-                     <label htmlFor="emr-text">EMR-Friendly Text</label>
-                   </h3>
-                   <button
-                     onClick={copyEmrText}
-                     className="text-xs bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-600 dark:text-slate-300 px-3 py-1.5 rounded-full transition-colors flex items-center gap-2 font-medium"
-                   >
-                     {copyState === 'copied' && <Check size={14} />}
-                     {copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Copy failed — select and copy manually' : 'Copy to Clipboard'}
-                   </button>
+              <div role="tabpanel" id="panel-schedule" aria-labelledby="tab-schedule" className={panelClass('schedule')}>
+                {/* Detailed List */}
+                <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
+                  <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-800/50">
+                     <h3 className="font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-2">
+                       <Calendar className="w-4 h-4" />
+                       Deprescribing Schedule for {drug.name || 'this medication'}
+                     </h3>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm text-left">
+                      <thead className="bg-slate-50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400 font-medium">
+                        <tr>
+                          <th scope="col" className="px-6 py-3">Date</th>
+                          <th scope="col" className="px-6 py-3">Step</th>
+                          <th scope="col" className="px-6 py-3">Target vs Actual</th>
+                          <th scope="col" className="px-6 py-3">
+                            {twiceDaily ? 'Morning / Night' : liquidOn ? 'Tablets / Liquid (Daily)' : 'Tablets Required (Daily)'}
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                        {schedule.steps.map(step => (
+                          <tr key={step.date + step.actualDose} className={`hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors ${step.isStop ? 'bg-green-50/50 dark:bg-green-900/20' : ''}`}>
+                            <td className="px-6 py-4 font-medium text-slate-700 dark:text-slate-200 whitespace-nowrap">
+                              {formatISODate(step.date, { weekday: 'short', month: 'short', day: 'numeric' })}
+                            </td>
+                            <td className="px-6 py-4 text-slate-500 dark:text-slate-300 whitespace-nowrap">
+                              {step.isStop
+                                ? <span className="text-green-600 dark:text-green-400 font-bold">STOP</span>
+                                : <>
+                                    Week {Math.floor(step.dayIndex / 7) + 1}
+                                    <span className="block text-xs text-slate-400 dark:text-slate-500">
+                                      for {describeDuration(step.durationDays)}
+                                    </span>
+                                  </>}
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className="flex flex-col">
+                                 <span className="font-semibold text-slate-800 dark:text-slate-100">
+                                   {formatDose(step.actualDose, 3)}{drug.unit}
+                                 </span>
+                                 {!step.isStop && (
+                                   <span className="text-xs text-slate-500 dark:text-slate-400">
+                                     Target: {formatDose(step.targetDose)}{drug.unit}
+                                   </span>
+                                 )}
+                                 {!step.isStop && step.actualDose < step.targetDose * 0.9 && (
+                                   <span className="text-[10px] text-amber-500 flex items-center gap-1 mt-1">
+                                     <AlertCircle size={10} /> {formatDose(step.targetDose - step.actualDose)}{drug.unit} below target
+                                   </span>
+                                 )}
+                                 {!step.isStop && step.reductionPercent !== null && (
+                                   <span className={`text-[10px] mt-1 ${step.reductionPercent > 15 ? 'text-amber-500 font-semibold' : 'text-slate-400 dark:text-slate-500'}`}>
+                                     ↓ {formatDose(step.reductionFromPrevious ?? 0, 3)}{drug.unit} ({formatDose(step.reductionPercent, 1)}%) from previous dose
+                                   </span>
+                                 )}
+                              </div>
+                            </td>
+                            <td className="px-6 py-4">
+                              {step.split ? (
+                                <div className="space-y-2">
+                                  {([['Morning', step.split.am], ['Night', step.split.pm]] as const).map(([when, part]) => (
+                                    <div key={when} className="flex items-center gap-2">
+                                      <span className="w-24 flex-shrink-0 text-xs text-slate-500 dark:text-slate-400">
+                                        {when}
+                                        <span className="block font-semibold text-slate-700 dark:text-slate-200">
+                                          {formatDose(part.dose, 3)}{drug.unit}
+                                        </span>
+                                      </span>
+                                      <TabletVisualizer
+                                        counts={part.tablets}
+                                        denominations={drug.denominations}
+                                        unit={drug.unit}
+                                        liquidMl={part.liquidMl}
+                                        concentration={liquid?.concentration}
+                                        emptyLabel="None"
+                                      />
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <TabletVisualizer
+                                  counts={step.tablets}
+                                  denominations={drug.denominations}
+                                  unit={drug.unit}
+                                  liquidMl={step.liquidMl}
+                                  concentration={liquid?.concentration}
+                                />
+                              )}
+                              {!step.isStop && (
+                                <div className="mt-2 text-[11px] text-slate-500 dark:text-slate-400 border-t border-slate-100 dark:border-slate-700/50 pt-2 font-medium">
+                                  Step Total: {describeTablets(step, drug.denominations, drug.unit, step.durationDays, liquid, true)}
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                        {schedule.endReason === 'truncated' && (
+                          <tr className="bg-amber-50 dark:bg-amber-900/20">
+                            <td colSpan={4} className="px-6 py-4 text-sm text-amber-800 dark:text-amber-200">
+                              The taper had not reached the stop dose when the schedule was cut off, so this plan
+                              is incomplete and shows no cessation date.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Total Tablets Summary */}
+                  <div className="bg-slate-50 dark:bg-slate-700/50 p-6 border-t border-slate-200 dark:border-slate-600">
+                    <h4 className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-3">Total Medication Required for Full Plan</h4>
+                    <div className="flex flex-wrap gap-4">
+                      {Object.entries(schedule.totalTablets).map(([id, count]: [string, number]) => {
+                        const denom = drug.denominations.find(d => d.id === id);
+                        if (!denom) return null;
+                        return (
+                          <div key={id} className="bg-white dark:bg-slate-800 px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-600 shadow-sm flex items-center gap-3">
+                             <div className="bg-teal-100 dark:bg-teal-900/50 text-teal-700 dark:text-teal-300 font-bold px-2 py-1 rounded text-xs">
+                               {denom.strength}{drug.unit}
+                             </div>
+                             <div className="text-slate-600 dark:text-slate-300 font-medium">
+                               {formatCount(count)} <span className="text-xs text-slate-400 font-normal">tablets taken</span>
+                               {supplyCount(count) !== count && (
+                                 <span className="block text-xs text-slate-500 dark:text-slate-400 font-normal">
+                                   supply {supplyCount(count)} whole tablets
+                                 </span>
+                               )}
+                             </div>
+                          </div>
+                        );
+                      })}
+                      {schedule.totalLiquidMl > 0 && liquid && (
+                        <div className="bg-white dark:bg-slate-800 px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-600 shadow-sm flex items-center gap-3">
+                          <div className="bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-300 font-bold px-2 py-1 rounded text-xs flex items-center gap-1">
+                            <Droplet size={12} /> {formatDose(liquid.concentration, 3)}{drug.unit}/mL
+                          </div>
+                          <div className="text-slate-600 dark:text-slate-300 font-medium">
+                            {formatDose(schedule.totalLiquidMl, 2)} <span className="text-xs text-slate-400 font-normal">mL</span>
+                            {bottleCount(schedule.totalLiquidMl, liquid) !== null && (
+                              <span className="block text-xs text-slate-500 dark:text-slate-400 font-normal">
+                                supply {bottleCount(schedule.totalLiquidMl, liquid)} × {liquid.bottleSizeMl}mL bottle{bottleCount(schedule.totalLiquidMl, liquid) === 1 ? '' : 's'}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
-                <textarea
-                  id="emr-text"
-                  readOnly
-                  value={emrText}
-                  className="w-full h-40 p-3 text-sm font-mono border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-300 rounded-lg outline-none resize-y"
+                {/* EMR Friendly Text */}
+                <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 p-6 transition-colors duration-200 print:hidden">
+                  <div className="flex justify-between items-center mb-4">
+                     <h3 className="font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-2">
+                       <Copy className="w-4 h-4" />
+                       <label htmlFor="emr-text">EMR-Friendly Text</label>
+                     </h3>
+                     <button
+                       onClick={copyEmrText}
+                       className="text-xs bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-600 dark:text-slate-300 px-3 py-1.5 rounded-full transition-colors flex items-center gap-2 font-medium"
+                     >
+                       {copyState === 'copied' && <Check size={14} />}
+                       {copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Copy failed — select and copy manually' : 'Copy to Clipboard'}
+                     </button>
+                  </div>
+                  <textarea
+                    id="emr-text"
+                    readOnly
+                    value={emrText}
+                    className="w-full h-40 p-3 text-sm font-mono border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-300 rounded-lg outline-none resize-y"
+                  />
+                </div>
+              </div>
+
+              <div role="tabpanel" id="panel-handout" aria-labelledby="tab-handout" className={panelClass('handout')}>
+                <PatientHandout
+                  drugName={drug.name}
+                  unit={drug.unit}
+                  steps={schedule.steps}
+                  denominations={drug.denominations}
+                  liquid={liquidOn ? liquid : undefined}
+                  isComplete={schedule.endReason !== 'truncated'}
                 />
               </div>
 
-              <PatientHandout
-                drugName={drug.name}
-                unit={drug.unit}
-                steps={schedule.steps}
-                denominations={drug.denominations}
-                liquid={liquidOn ? liquid : undefined}
-                isComplete={schedule.endReason !== 'truncated'}
-              />
-
-              {/* Detailed List */}
-              <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
-                <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-800/50">
-                   <h3 className="font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-2">
-                     <Calendar className="w-4 h-4" />
-                     Deprescribing Schedule for {drug.name || 'this medication'}
-                   </h3>
-                </div>
-
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm text-left">
-                    <thead className="bg-slate-50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400 font-medium">
-                      <tr>
-                        <th scope="col" className="px-6 py-3">Date</th>
-                        <th scope="col" className="px-6 py-3">Step</th>
-                        <th scope="col" className="px-6 py-3">Target vs Actual</th>
-                        <th scope="col" className="px-6 py-3">
-                          {twiceDaily ? 'Morning / Night' : liquidOn ? 'Tablets / Liquid (Daily)' : 'Tablets Required (Daily)'}
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                      {schedule.steps.map(step => (
-                        <tr key={step.date + step.actualDose} className={`hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors ${step.isStop ? 'bg-green-50/50 dark:bg-green-900/20' : ''}`}>
-                          <td className="px-6 py-4 font-medium text-slate-700 dark:text-slate-200 whitespace-nowrap">
-                            {formatISODate(step.date, { weekday: 'short', month: 'short', day: 'numeric' })}
-                          </td>
-                          <td className="px-6 py-4 text-slate-500 dark:text-slate-300 whitespace-nowrap">
-                            {step.isStop
-                              ? <span className="text-green-600 dark:text-green-400 font-bold">STOP</span>
-                              : <>
-                                  Week {Math.floor(step.dayIndex / 7) + 1}
-                                  <span className="block text-xs text-slate-400 dark:text-slate-500">
-                                    for {describeDuration(step.durationDays)}
-                                  </span>
-                                </>}
-                          </td>
-                          <td className="px-6 py-4">
-                            <div className="flex flex-col">
-                               <span className="font-semibold text-slate-800 dark:text-slate-100">
-                                 {formatDose(step.actualDose, 3)}{drug.unit}
-                               </span>
-                               {!step.isStop && (
-                                 <span className="text-xs text-slate-500 dark:text-slate-400">
-                                   Target: {formatDose(step.targetDose)}{drug.unit}
-                                 </span>
-                               )}
-                               {!step.isStop && step.actualDose < step.targetDose * 0.9 && (
-                                 <span className="text-[10px] text-amber-500 flex items-center gap-1 mt-1">
-                                   <AlertCircle size={10} /> {formatDose(step.targetDose - step.actualDose)}{drug.unit} below target
-                                 </span>
-                               )}
-                               {!step.isStop && step.reductionPercent !== null && (
-                                 <span className={`text-[10px] mt-1 ${step.reductionPercent > 15 ? 'text-amber-500 font-semibold' : 'text-slate-400 dark:text-slate-500'}`}>
-                                   ↓ {formatDose(step.reductionFromPrevious ?? 0, 3)}{drug.unit} ({formatDose(step.reductionPercent, 1)}%) from previous dose
-                                 </span>
-                               )}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4">
-                            {step.split ? (
-                              <div className="space-y-2">
-                                {([['Morning', step.split.am], ['Night', step.split.pm]] as const).map(([when, part]) => (
-                                  <div key={when} className="flex items-center gap-2">
-                                    <span className="w-24 flex-shrink-0 text-xs text-slate-500 dark:text-slate-400">
-                                      {when}
-                                      <span className="block font-semibold text-slate-700 dark:text-slate-200">
-                                        {formatDose(part.dose, 3)}{drug.unit}
-                                      </span>
-                                    </span>
-                                    <TabletVisualizer
-                                      counts={part.tablets}
-                                      denominations={drug.denominations}
-                                      unit={drug.unit}
-                                      liquidMl={part.liquidMl}
-                                      concentration={liquid?.concentration}
-                                      emptyLabel="None"
-                                    />
-                                  </div>
-                                ))}
-                              </div>
-                            ) : (
-                              <TabletVisualizer
-                                counts={step.tablets}
-                                denominations={drug.denominations}
-                                unit={drug.unit}
-                                liquidMl={step.liquidMl}
-                                concentration={liquid?.concentration}
-                              />
-                            )}
-                            {!step.isStop && (
-                              <div className="mt-2 text-[11px] text-slate-500 dark:text-slate-400 border-t border-slate-100 dark:border-slate-700/50 pt-2 font-medium">
-                                Step Total: {describeTablets(step, drug.denominations, drug.unit, step.durationDays, liquid, true)}
-                              </div>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                      {schedule.endReason === 'truncated' && (
-                        <tr className="bg-amber-50 dark:bg-amber-900/20">
-                          <td colSpan={4} className="px-6 py-4 text-sm text-amber-800 dark:text-amber-200">
-                            The taper had not reached the stop dose when the schedule was cut off, so this plan
-                            is incomplete and shows no cessation date.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* Total Tablets Summary */}
-                <div className="bg-slate-50 dark:bg-slate-700/50 p-6 border-t border-slate-200 dark:border-slate-600">
-                  <h4 className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-3">Total Medication Required for Full Plan</h4>
-                  <div className="flex flex-wrap gap-4">
-                    {Object.entries(schedule.totalTablets).map(([id, count]: [string, number]) => {
-                      const denom = drug.denominations.find(d => d.id === id);
-                      if (!denom) return null;
-                      return (
-                        <div key={id} className="bg-white dark:bg-slate-800 px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-600 shadow-sm flex items-center gap-3">
-                           <div className="bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 font-bold px-2 py-1 rounded text-xs">
-                             {denom.strength}{drug.unit}
-                           </div>
-                           <div className="text-slate-600 dark:text-slate-300 font-medium">
-                             {formatCount(count)} <span className="text-xs text-slate-400 font-normal">tablets taken</span>
-                             {supplyCount(count) !== count && (
-                               <span className="block text-xs text-slate-500 dark:text-slate-400 font-normal">
-                                 supply {supplyCount(count)} whole tablets
-                               </span>
-                             )}
-                           </div>
-                        </div>
-                      );
-                    })}
-                    {schedule.totalLiquidMl > 0 && liquid && (
-                      <div className="bg-white dark:bg-slate-800 px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-600 shadow-sm flex items-center gap-3">
-                        <div className="bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-300 font-bold px-2 py-1 rounded text-xs flex items-center gap-1">
-                          <Droplet size={12} /> {formatDose(liquid.concentration, 3)}{drug.unit}/mL
-                        </div>
-                        <div className="text-slate-600 dark:text-slate-300 font-medium">
-                          {formatDose(schedule.totalLiquidMl, 2)} <span className="text-xs text-slate-400 font-normal">mL</span>
-                          {bottleCount(schedule.totalLiquidMl, liquid) !== null && (
-                            <span className="block text-xs text-slate-500 dark:text-slate-400 font-normal">
-                              supply {bottleCount(schedule.totalLiquidMl, liquid)} × {liquid.bottleSizeMl}mL bottle{bottleCount(schedule.totalLiquidMl, liquid) === 1 ? '' : 's'}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
+              <div role="tabpanel" id="panel-maudsley" aria-labelledby="tab-maudsley" className={panelClass('maudsley')}>
+                <MaudsleyReference
+                  onLoadRegimen={loadMaudsleyRegimen}
+                  overlaidRegimenId={overlaidRegimenId}
+                  onToggleOverlay={toggleMaudsleyOverlay}
+                />
               </div>
             </>
           )}

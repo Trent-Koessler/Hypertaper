@@ -77,7 +77,7 @@ const MaudsleyReference: React.FC<MaudsleyReferenceProps> = ({
   overlaidRegimenId,
   onToggleOverlay
 }) => {
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(true);
   const [activeId, setActiveId] = useState<string>(MAUDSLEY_DIAZEPAM_REGIMENS[0].id);
   const [showNotes, setShowNotes] = useState(false);
 
@@ -118,7 +118,7 @@ const MaudsleyReference: React.FC<MaudsleyReferenceProps> = ({
                 onClick={() => setActiveId(regimen.id)}
                 className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
                   regimen.id === activeId
-                    ? 'bg-blue-600 border-blue-600 text-white'
+                    ? 'bg-teal-600 border-teal-600 text-white'
                     : 'border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
                 }`}
               >
@@ -145,7 +145,7 @@ const MaudsleyReference: React.FC<MaudsleyReferenceProps> = ({
               aria-pressed={isOverlaid}
               className={`text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-colors font-medium ${
                 isOverlaid
-                  ? 'bg-blue-600 text-white'
+                  ? 'bg-teal-600 text-white'
                   : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-600'
               }`}
             >
@@ -172,7 +172,7 @@ const MaudsleyReference: React.FC<MaudsleyReferenceProps> = ({
             <button
               onClick={() => setShowNotes(open => !open)}
               aria-expanded={showNotes}
-              className="text-xs font-medium text-blue-600 dark:text-blue-400 flex items-center gap-1"
+              className="text-xs font-medium text-teal-600 dark:text-teal-400 flex items-center gap-1"
             >
               {showNotes ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
               Deprescribing notes from the guideline
