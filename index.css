@@ -52,4 +52,28 @@ body {
     padding: 6px 8px !important;
     border-bottom: 1px solid #cbd5e1 !important;
   }
+
+  /* "Print Plan" is the clinician's copy; the handout has its own button. */
+  html:not(.print-handout) #patient-handout-card {
+    display: none !important;
+  }
+
+  /* "Print handout" prints the patient handout and nothing else. */
+  html.print-handout header,
+  html.print-handout main > div:first-child,
+  html.print-handout main > div:last-child > :not(#patient-handout-card),
+  html.print-handout #patient-handout-card > :not(#patient-handout) {
+    display: none !important;
+  }
+
+  html.print-handout #patient-handout-card,
+  html.print-handout #patient-handout {
+    border: none !important;
+    padding: 0 !important;
+  }
+
+  html.print-handout #patient-handout th,
+  html.print-handout #patient-handout td {
+    border: 1px solid #64748b !important;
+  }
 }

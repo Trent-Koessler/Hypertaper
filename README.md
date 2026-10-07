@@ -14,7 +14,7 @@ HyperTaper is a pure client-side web application designed to assist clinicians i
   be shared evenly. The split never changes the daily total.
 - **Liquid Formulations**: Optionally give the whole taper, the doses below a chosen level, or
   everything after the first tablet step that would drop by more than a chosen tolerance
-  (e.g. 15%), as an oral liquid. Enter the concentration (e.g. 1mg/mL) and the smallest volume that
+  (e.g. 15%), as an oral liquid. Liquid totals include the number of bottles to supply. Enter the concentration (e.g. 1mg/mL) and the smallest volume that
   can be measured (e.g. 0.1mL); each liquid dose is rounded *down* to whole measures. This keeps
   the low-dose tail gentle where quartered tablets would force a large final drop, and the
   plan never steps up when it switches from tablets to liquid.
@@ -28,6 +28,10 @@ HyperTaper is a pure client-side web application designed to assist clinicians i
   overlaid on the chart to compare a generated plan against the published guidance.
 - **Supply Counts**: Tablet totals show both the exact amount taken (which can include cut
   pieces) and the whole tablets to supply, rounded up, for each step and for the whole plan.
+- **Patient Handout**: A plain-language, printable copy of the plan with one row per step —
+  dates, morning and night amounts (e.g. "1½ × 2mg tablets", "0.6mL of liquid"), the total
+  each day and a tick box. Name and contact details are blank lines to fill in by hand, so no
+  patient information is entered into the app. "Print handout" prints the handout alone.
 - **EMR Integration**: One-click copy of a fixed-width plain-text plan for pasting directly into clinical notes.
 - **Secure & Private**: 100% client-side logic. No patient data is sent to external servers!!!
 

@@ -8,6 +8,7 @@ import TabletVisualizer from './components/TabletVisualizer';
 import CalculationBreakdown from './components/CalculationBreakdown';
 import MathsExplainer from './components/MathsExplainer';
 import MaudsleyReference from './components/MaudsleyReference';
+import PatientHandout from './components/PatientHandout';
 import {
   MAUDSLEY_TABLET_STRENGTHS,
   MaudsleyRegimen,
@@ -47,6 +48,10 @@ const readStoredTheme = (): boolean => {
 
 /** Formats a tablet count, hiding the decimals on whole numbers. */
 const formatCount = (count: number): string => count.toFixed(count % 1 === 0 ? 0 : 2);
+
+/** Bottles to supply for a liquid volume, or null when no bottle size is set. */
+const bottleCount = (totalMl: number, liquid?: LiquidConfig): number | null =>
+  liquid?.bottleSizeMl && liquid.bottleSizeMl > 0 ? Math.ceil(totalMl / liquid.bottleSizeMl - 1e-9) : null;
 
 /** Whole tablets to supply for a count that may include cut pieces. */
 const supplyCount = (count: number): number => Math.ceil(count - 1e-9);
@@ -106,7 +111,8 @@ const App: React.FC = () => {
       switchBelowDose: 2,
       maxTabletDropPercent: 15,
       concentration: 1,
-      measureIncrementMl: 0.1
+      measureIncrementMl: 0.1,
+      bottleSizeMl: 100
     },
     // Diazepam is usually divided morning and night, as in the Maudsley tables.
     dosesPerDay: 2
@@ -276,7 +282,9 @@ const App: React.FC = () => {
       }
     });
     if (schedule.totalLiquidMl > 0 && liquid) {
-      text += `- ${formatDose(schedule.totalLiquidMl, 2)}mL of ${liquid.concentration}${drug.unit}/mL liquid\n`;
+      const bottles = bottleCount(schedule.totalLiquidMl, liquid);
+      text += `- ${formatDose(schedule.totalLiquidMl, 2)}mL of ${liquid.concentration}${drug.unit}/mL liquid`
+        + (bottles !== null ? ` (supply ${bottles} x ${liquid.bottleSizeMl}mL bottle${bottles === 1 ? '' : 's'})` : '') + `\n`;
     }
 
     if (schedule.warnings.length > 0) {
@@ -599,6 +607,22 @@ const App: React.FC = () => {
                         </div>
                       </div>
 
+                      <div>
+                        <label htmlFor="liquid-bottle" className="block text-xs font-medium text-slate-500 dark:text-slate-400 uppercase mb-1">Bottle size</label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            id="liquid-bottle"
+                            type="number"
+                            min="0"
+                            step="any"
+                            value={liquid.bottleSizeMl ?? ''}
+                            onChange={e => updateLiquid('bottleSizeMl', Number(e.target.value))}
+                            className="w-full px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded text-sm bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-100"
+                          />
+                          <span className="text-sm text-slate-400 w-10">mL</span>
+                        </div>
+                      </div>
+
                       <p className="text-xs text-slate-500 dark:text-slate-400 flex items-start gap-1">
                         <Info size={14} className="mt-0.5 flex-shrink-0" />
                         <span>
@@ -808,6 +832,15 @@ const App: React.FC = () => {
                 />
               </div>
 
+              <PatientHandout
+                drugName={drug.name}
+                unit={drug.unit}
+                steps={schedule.steps}
+                denominations={drug.denominations}
+                liquid={liquidOn ? liquid : undefined}
+                isComplete={schedule.endReason !== 'truncated'}
+              />
+
               {/* Detailed List */}
               <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
                 <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-800/50">
@@ -948,6 +981,11 @@ const App: React.FC = () => {
                         </div>
                         <div className="text-slate-600 dark:text-slate-300 font-medium">
                           {formatDose(schedule.totalLiquidMl, 2)} <span className="text-xs text-slate-400 font-normal">mL</span>
+                          {bottleCount(schedule.totalLiquidMl, liquid) !== null && (
+                            <span className="block text-xs text-slate-500 dark:text-slate-400 font-normal">
+                              supply {bottleCount(schedule.totalLiquidMl, liquid)} × {liquid.bottleSizeMl}mL bottle{bottleCount(schedule.totalLiquidMl, liquid) === 1 ? '' : 's'}
+                            </span>
+                          )}
                         </div>
                       </div>
                     )}

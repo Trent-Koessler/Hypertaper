@@ -26,6 +26,8 @@ export interface LiquidConfig {
   concentration: number;
   /** The smallest volume that can be measured reliably, e.g. 0.1mL with an oral syringe. */
   measureIncrementMl: number;
+  /** Volume of one bottle, for counting how many to supply. */
+  bottleSizeMl?: number;
 }
 
 export interface DrugConfig {
