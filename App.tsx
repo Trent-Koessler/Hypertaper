@@ -10,6 +10,7 @@ import MathsExplainer from './components/MathsExplainer';
 import MaudsleyReference from './components/MaudsleyReference';
 import PatientHandout from './components/PatientHandout';
 import AppIcon from './components/AppIcon';
+import NumberInput from './components/NumberInput';
 import {
   MAUDSLEY_TABLET_STRENGTHS,
   MaudsleyRegimen,
@@ -414,13 +415,12 @@ const App: React.FC = () => {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label htmlFor="current-dose" className="block text-xs font-medium text-slate-500 dark:text-slate-400 uppercase mb-1">Current Dose</label>
-                  <input
+                  <NumberInput
                     id="current-dose"
-                    type="number"
                     min="0"
                     step="any"
                     value={drug.currentDose}
-                    onChange={e => setDrug({...drug, currentDose: Number(e.target.value)})}
+                    onChange={v => setDrug({...drug, currentDose: v})}
                     className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-100"
                   />
                 </div>
@@ -507,14 +507,13 @@ const App: React.FC = () => {
                   {drug.denominations.map(denom => (
                     <div key={denom.id} className="flex flex-col gap-2 bg-slate-50 dark:bg-slate-700/50 p-2 rounded-lg border border-slate-200 dark:border-slate-600">
                       <div className="flex gap-2 items-center">
-                        <input
-                          type="number"
+                        <NumberInput
                           min="0"
                           step="any"
                           placeholder="Strength"
                           aria-label={`Tablet strength in ${drug.unit}`}
-                          value={denom.strength || ''}
-                          onChange={e => updateDenom(denom.id, 'strength', Number(e.target.value))}
+                          value={denom.strength || undefined}
+                          onChange={v => updateDenom(denom.id, 'strength', v)}
                           className="flex-1 px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded text-sm bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-100"
                         />
                         <span className="text-sm text-slate-400 w-8">{drug.unit}</span>
@@ -580,13 +579,12 @@ const App: React.FC = () => {
                         <div>
                           <label htmlFor="liquid-tolerance" className="block text-xs font-medium text-slate-500 dark:text-slate-400 uppercase mb-1">Switch when a tablet drop exceeds</label>
                           <div className="flex items-center gap-2">
-                            <input
+                            <NumberInput
                               id="liquid-tolerance"
-                              type="number"
                               min="0"
                               step="any"
                               value={liquid.maxTabletDropPercent}
-                              onChange={e => updateLiquid('maxTabletDropPercent', Number(e.target.value))}
+                              onChange={v => updateLiquid('maxTabletDropPercent', v)}
                               className="w-full px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded text-sm bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-100"
                             />
                             <span className="text-sm text-slate-400 w-10">%</span>
@@ -601,13 +599,12 @@ const App: React.FC = () => {
                         <div>
                           <label htmlFor="liquid-switch" className="block text-xs font-medium text-slate-500 dark:text-slate-400 uppercase mb-1">Switch to liquid below</label>
                           <div className="flex items-center gap-2">
-                            <input
+                            <NumberInput
                               id="liquid-switch"
-                              type="number"
                               min="0"
                               step="any"
                               value={liquid.switchBelowDose}
-                              onChange={e => updateLiquid('switchBelowDose', Number(e.target.value))}
+                              onChange={v => updateLiquid('switchBelowDose', v)}
                               className="w-full px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded text-sm bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-100"
                             />
                             <span className="text-sm text-slate-400 w-10">{drug.unit}</span>
@@ -619,13 +616,12 @@ const App: React.FC = () => {
                         <div>
                           <label htmlFor="liquid-concentration" className="block text-xs font-medium text-slate-500 dark:text-slate-400 uppercase mb-1">Strength</label>
                           <div className="flex items-center gap-1">
-                            <input
+                            <NumberInput
                               id="liquid-concentration"
-                              type="number"
                               min="0"
                               step="any"
                               value={liquid.concentration}
-                              onChange={e => updateLiquid('concentration', Number(e.target.value))}
+                              onChange={v => updateLiquid('concentration', v)}
                               className="w-full px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded text-sm bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-100"
                             />
                             <span className="text-xs text-slate-400 whitespace-nowrap">{drug.unit}/mL</span>
@@ -634,13 +630,12 @@ const App: React.FC = () => {
                         <div>
                           <label htmlFor="liquid-increment" className="block text-xs font-medium text-slate-500 dark:text-slate-400 uppercase mb-1">Measure to</label>
                           <div className="flex items-center gap-1">
-                            <input
+                            <NumberInput
                               id="liquid-increment"
-                              type="number"
                               min="0"
                               step="any"
                               value={liquid.measureIncrementMl}
-                              onChange={e => updateLiquid('measureIncrementMl', Number(e.target.value))}
+                              onChange={v => updateLiquid('measureIncrementMl', v)}
                               className="w-full px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded text-sm bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-100"
                             />
                             <span className="text-xs text-slate-400">mL</span>
@@ -651,13 +646,12 @@ const App: React.FC = () => {
                       <div>
                         <label htmlFor="liquid-bottle" className="block text-xs font-medium text-slate-500 dark:text-slate-400 uppercase mb-1">Bottle size</label>
                         <div className="flex items-center gap-2">
-                          <input
+                          <NumberInput
                             id="liquid-bottle"
-                            type="number"
                             min="0"
                             step="any"
-                            value={liquid.bottleSizeMl ?? ''}
-                            onChange={e => updateLiquid('bottleSizeMl', Number(e.target.value))}
+                            value={liquid.bottleSizeMl}
+                            onChange={v => updateLiquid('bottleSizeMl', v)}
                             className="w-full px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded text-sm bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-100"
                           />
                           <span className="text-sm text-slate-400 w-10">mL</span>
@@ -713,25 +707,23 @@ const App: React.FC = () => {
                     <label htmlFor="reduction-value" className="block text-xs font-medium text-slate-500 dark:text-slate-400 uppercase mb-1">
                       {wean.reductionType === 'percentage' ? 'Reduction %' : `Amount (${drug.unit})`}
                     </label>
-                    <input
+                    <NumberInput
                       id="reduction-value"
-                      type="number"
                       min="0"
                       step="any"
                       value={wean.reductionValue}
-                      onChange={e => setWean({...wean, reductionValue: Number(e.target.value)})}
+                      onChange={v => setWean({...wean, reductionValue: v})}
                       className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-100"
                     />
                   </div>
                   <div>
                     <label htmlFor="interval-days" className="block text-xs font-medium text-slate-500 dark:text-slate-400 uppercase mb-1">Every (Days)</label>
-                    <input
+                    <NumberInput
                       id="interval-days"
-                      type="number"
                       min="1"
                       step="1"
                       value={wean.intervalDays}
-                      onChange={e => setWean({...wean, intervalDays: Number(e.target.value)})}
+                      onChange={v => setWean({...wean, intervalDays: v})}
                       className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg outline-none bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-100"
                     />
                   </div>
@@ -740,13 +732,12 @@ const App: React.FC = () => {
                <div>
                  <label htmlFor="min-dose" className="block text-xs font-medium text-slate-500 dark:text-slate-400 uppercase mb-1">Stop Taper At (Min Dose)</label>
                  <div className="flex items-center gap-2">
-                   <input
+                   <NumberInput
                      id="min-dose"
-                     type="number"
                      min="0"
                      step="0.1"
                      value={wean.minimumDoseThreshold}
-                     onChange={e => setWean({...wean, minimumDoseThreshold: Number(e.target.value)})}
+                     onChange={v => setWean({...wean, minimumDoseThreshold: v})}
                      className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-100"
                    />
                    <span className="text-sm text-slate-400">{drug.unit}</span>
