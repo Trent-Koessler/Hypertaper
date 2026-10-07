@@ -46,6 +46,12 @@ export interface WeanConfig {
   reductionValue: number; // e.g., 10 (percent) or 5 (mg)
   intervalDays: number; // e.g., reduce every 14 days
   minimumDoseThreshold: number; // Lowest dose to prescribe before stopping (inclusive)
+  /**
+   * When true, the start date is the day the first reduction is taken (e.g. the
+   * clinic visit), and the current dose is treated as already held. When false
+   * or absent, the current dose is held for one interval from the start date.
+   */
+  reduceOnStartDate?: boolean;
 }
 
 /** One physical piece counted towards a dose: a whole tablet, or a half/quarter. */

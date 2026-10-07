@@ -132,7 +132,8 @@ const App: React.FC = () => {
     reductionType: 'percentage',
     reductionValue: 10,
     intervalDays: 14,
-    minimumDoseThreshold: 0.5
+    minimumDoseThreshold: 0.5,
+    reduceOnStartDate: false
   });
 
   const [isCustomDrug, setIsCustomDrug] = useState(false);
@@ -250,6 +251,7 @@ const App: React.FC = () => {
     text += `Reduction: ${wean.reductionType === 'percentage' ? `${wean.reductionValue}%` : `${wean.reductionValue}${drug.unit}`} every ${wean.intervalDays} days\n`;
     text += `Stop Dose: ${wean.minimumDoseThreshold}${drug.unit}\n`;
     text += `Dosing: ${twiceDaily ? 'twice daily (morning and night)' : 'once daily'}\n`;
+    if (wean.reduceOnStartDate) text += `First reduction: on the start date (${drug.startDate})\n`;
     if (liquidOn) {
       text += `Liquid: ${liquid!.concentration}${drug.unit}/mL, measured to ${liquid!.measureIncrementMl}mL, `
         + (liquidOnly
@@ -327,7 +329,12 @@ const App: React.FC = () => {
   };
 
   const heldSteps = schedule.steps.filter(step => !step.isStop);
-  const finalDose = heldSteps.length > 0 ? heldSteps[heldSteps.length - 1].actualDose : 0;
+  // When the first reduction is on the start date, a plan can stop straight from
+  // the current dose with no held step left; the stop step records that dose.
+  const stopStep = schedule.steps.find(step => step.isStop);
+  const finalDose = heldSteps.length > 0
+    ? heldSteps[heldSteps.length - 1].actualDose
+    : stopStep?.reductionFromPrevious ?? 0;
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100 font-sans transition-colors duration-200">
@@ -446,6 +453,25 @@ const App: React.FC = () => {
                   onChange={e => setDrug({...drug, startDate: e.target.value})}
                   className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg outline-none bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-100"
                 />
+                <span className="block text-xs font-medium text-slate-500 dark:text-slate-400 uppercase mt-3 mb-1">On the Start Date</span>
+                <div className="flex bg-slate-100 dark:bg-slate-700 p-1 rounded-lg" role="radiogroup" aria-label="On the start date">
+                  {([[false, 'Keep current dose'], [true, 'Make first reduction']] as const).map(([onStart, label]) => (
+                    <button
+                      key={label}
+                      role="radio"
+                      aria-checked={(wean.reduceOnStartDate ?? false) === onStart}
+                      onClick={() => setWean(prev => ({ ...prev, reduceOnStartDate: onStart }))}
+                      className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-all ${(wean.reduceOnStartDate ?? false) === onStart ? 'bg-white dark:bg-slate-800 text-teal-600 dark:text-teal-400 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-slate-400 dark:text-slate-500 mt-1.5">
+                  {wean.reduceOnStartDate
+                    ? 'The first lower dose starts on this date, e.g. the day of the clinic visit.'
+                    : `The current dose is held for one interval from this date, then reduced.`}
+                </p>
               </div>
 
               <div>
