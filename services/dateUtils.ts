@@ -55,3 +55,10 @@ export function formatISODate(iso: string, options: Intl.DateTimeFormatOptions):
   const date = parseISODateLocal(iso);
   return date ? date.toLocaleDateString(undefined, options) : iso;
 }
+
+/** Renders an ISO calendar date as dd-mm-yyyy ("2027-11-18" → "18-11-2027"). */
+export function formatDMY(iso: string): string {
+  if (!isValidISODate(iso)) return iso;
+  const [y, m, d] = iso.split('-');
+  return `${d}-${m}-${y}`;
+}

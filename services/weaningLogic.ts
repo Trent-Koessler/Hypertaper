@@ -11,7 +11,7 @@ import {
   LiquidConfig,
   SplitDose
 } from '../types';
-import { addDaysISO, isValidISODate, todayISO } from './dateUtils';
+import { addDaysISO, formatDMY, isValidISODate, todayISO } from './dateUtils';
 
 /** A physically takeable piece: a whole tablet, or a half/quarter of one. */
 interface Piece {
@@ -631,7 +631,7 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
   if (worstDrop) {
     const from = roundDose(worstDrop.actualDose + (worstDrop.reductionFromPrevious ?? 0));
     warnings.push(
-      `The available ${worstDrop.liquidMl !== undefined ? 'liquid measure forces' : 'strengths force'} a ${num(worstDrop.reductionPercent!, 1)}% drop on ${worstDrop.date} (${num(from)}${unit} to ${num(worstDrop.actualDose)}${unit}), which is steeper than the requested reduction. ${worstDrop.liquidMl !== undefined ? 'Measure a smaller volume, use a more dilute liquid,' : 'Add a smaller strength, allow splitting,'} or lengthen the interval so the patient holds each dose for longer.`
+      `The available ${worstDrop.liquidMl !== undefined ? 'liquid measure forces' : 'strengths force'} a ${num(worstDrop.reductionPercent!, 1)}% drop on ${formatDMY(worstDrop.date)} (${num(from)}${unit} to ${num(worstDrop.actualDose)}${unit}), which is steeper than the requested reduction. ${worstDrop.liquidMl !== undefined ? 'Measure a smaller volume, use a more dilute liquid,' : 'Add a smaller strength, allow splitting,'} or lengthen the interval so the patient holds each dose for longer.`
     );
   }
 
@@ -640,7 +640,7 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
   const uneven = steps.find(step => step.split && step.split.am.dose < step.split.pm.dose / 2 - EPSILON);
   if (uneven?.split) {
     warnings.push(
-      `From ${uneven.date} the available pieces cannot divide the daily dose evenly: ${num(uneven.split.am.dose)}${unit} in the morning and ${num(uneven.split.pm.dose)}${unit} at night.${uneven.split.am.dose === 0 ? ' The whole dose is taken at night.' : ''}`
+      `From ${formatDMY(uneven.date)} the available pieces cannot divide the daily dose evenly: ${num(uneven.split.am.dose)}${unit} in the morning and ${num(uneven.split.pm.dose)}${unit} at night.${uneven.split.am.dose === 0 ? ' The whole dose is taken at night.' : ''}`
     );
   }
 
