@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { ScheduleResult } from '../types';
 import { addDaysISO, parseISODateLocal } from '../services/dateUtils';
@@ -29,6 +29,7 @@ interface ChartPoint {
 type TickMode = 'auto' | 'day' | 'week' | 'month';
 type YScale = 'linear' | 'log';
 type YUnit = 'dose' | 'percent';
+type WindowPreset = 'full' | 'first12' | 'last12' | 'custom';
 
 const DAY_MS = 86_400_000;
 
@@ -127,8 +128,25 @@ const WeanChart: React.FC<WeanChartProps> = ({
   const [showPrescribed, setShowPrescribed] = useState(true);
   const [showIdeal, setShowIdeal] = useState(true);
   const [showReference, setShowReference] = useState(true);
-  const [fromDate, setFromDate] = useState('');
-  const [toDate, setToDate] = useState('');
+  // A preset window follows the plan as its dates change; typed dates are
+  // kept until the start date moves, which would leave them describing a
+  // different plan.
+  const [windowPreset, setWindowPreset] = useState<WindowPreset>('full');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
+  useEffect(() => {
+    setWindowPreset(preset => (preset === 'custom' ? 'full' : preset));
+  }, [startDate]);
+  const [fromDate, toDate] =
+    windowPreset === 'first12' ? [startDate, addDaysISO(startDate, 84)]
+    : windowPreset === 'last12' ? [addDaysISO(endDate, -84), endDate]
+    : windowPreset === 'custom' ? [customFrom, customTo]
+    : ['', ''];
+  const setCustomWindow = (from: string, to: string) => {
+    setCustomFrom(from);
+    setCustomTo(to);
+    setWindowPreset('custom');
+  };
 
   // The two series are sampled at different dates: the plan holds a dose across
   // several intervals, while the ideal curve moves at every interval. Merging on
@@ -279,9 +297,9 @@ const WeanChart: React.FC<WeanChartProps> = ({
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
         <h3 className="text-sm font-semibold text-slate-500 dark:text-slate-400">Projected Taper Curve</h3>
         <div className="flex flex-wrap items-center gap-2 print:hidden">
-          {preset('Full plan', () => { setFromDate(''); setToDate(''); })}
-          {preset('First 12 weeks', () => { setFromDate(startDate); setToDate(addDaysISO(startDate, 84)); })}
-          {preset('Last 12 weeks', () => { setFromDate(addDaysISO(endDate, -84)); setToDate(endDate); })}
+          {preset('Full plan', () => setWindowPreset('full'))}
+          {preset('First 12 weeks', () => setWindowPreset('first12'))}
+          {preset('Last 12 weeks', () => setWindowPreset('last12'))}
         </div>
       </div>
 
@@ -293,7 +311,7 @@ const WeanChart: React.FC<WeanChartProps> = ({
             value={fromDate}
             min={startDate}
             max={axisMaxDate}
-            onChange={e => setFromDate(e.target.value)}
+            onChange={e => setCustomWindow(e.target.value, toDate)}
             className={controlClass}
           />
         </label>
@@ -304,7 +322,7 @@ const WeanChart: React.FC<WeanChartProps> = ({
             value={toDate}
             min={startDate}
             max={axisMaxDate}
-            onChange={e => setToDate(e.target.value)}
+            onChange={e => setCustomWindow(fromDate, e.target.value)}
             className={controlClass}
           />
         </label>

@@ -41,17 +41,32 @@ const CalculationBreakdown: React.FC<CalculationBreakdownProps> = ({ drug, wean,
       ? `target(n) = ${num(schedule.startingDose)} x (1 - ${num(wean.reductionValue)}/100)^n`
       : `target(n) = ${num(schedule.startingDose)} - (n x ${num(wean.reductionValue)})`;
 
+    const rounding = wean.rounding ?? 'below';
+    const choice = {
+      below: 'takes the largest total that does not exceed the target. It never rounds up, so no step can prescribe more than the curve asks for.',
+      nearest: 'takes whichever achievable total is closest to the target, the lower one on a tie, so a step can sit a little above the curve. Zero counts as achievable, so the taper stops once the target is closer to zero than to the smallest dose.',
+      hold: 'takes the smallest total at or above the target, so each dose is held until the curve reaches the next achievable dose down, and steps sit on or above the curve. The last dose is stopped once the target is closer to zero than to it.'
+    }[rounding];
+    const neverAbove = rounding === 'below'
+      ? ''
+      : ' No step prescribes more than the step before it, or more than the starting dose. A negative "short by" means the dose is above the target.';
+    const measures = rounding === 'below'
+      ? 'that does not exceed the target'
+      : 'chosen the same way';
+
     return [
       `1. Ideal curve. Interval n falls on day n x ${intervalDays}, and asks for ${curve}. Each target is computed from the original dose, not from the previously prescribed one, so tablet rounding at one step never compounds into the rest of the curve.`,
-      `2. Achievable dose. For each target, the engine searches every combination of the available pieces and takes the largest total that does not exceed the target. It never rounds up, so no step can prescribe more than the curve asks for.${liquid ? ` ${liquid.mode === 'whole' ? 'Every target' : liquid.mode === 'tolerance' ? `Once the next tablet step would drop by more than ${num(liquid.maxTabletDropPercent)}% (or no smaller tablet dose exists), that and every later target` : `A target below ${num(liquid.switchBelowDose)}${unit}`} is given as liquid instead: the largest whole number of ${num(liquid.measureIncrementMl)}mL measures (${num(liquidIncrement)}${unit} each at ${num(liquid.concentration)}${unit}/mL) that does not exceed the target. If changing formulation would raise the dose above the previous step, the previous dose is held instead.` : ''}`,
+      `2. Achievable dose. For each target, the engine searches every combination of the available pieces and ${choice}${neverAbove}${liquid ? ` ${liquid.mode === 'whole' ? 'Every target' : liquid.mode === 'tolerance' ? `Once the next tablet step would drop by more than ${num(liquid.maxTabletDropPercent)}% (or no smaller tablet dose exists), that and every later target` : `A target below ${num(liquid.switchBelowDose)}${unit}`} is given as liquid instead: the largest whole number of ${num(liquid.measureIncrementMl)}mL measures (${num(liquidIncrement)}${unit} each at ${num(liquid.concentration)}${unit}/mL) ${measures}. If changing formulation would raise the dose above the previous step, the previous dose is held instead.` : ''}`,
       `3. Holding. When two consecutive intervals resolve to the same achievable dose, they are merged into one held step. The dose is held until the curve falls far enough to justify the next achievable dose down.`,
       `4. Stopping. Intervals are generated while target(n) is at or above the stop dose of ${num(wean.minimumDoseThreshold)}${unit}, so the stop dose itself is prescribed before cessation.`,
       `5. Preference. Among combinations that reach the same dose, the engine prefers the fewest pieces, and then the fewest cut tablets.`,
       ...(drug.dosesPerDay === 2
-        ? [`6. Morning and night. Each daily dose is divided into the most even morning and night doses the pieces allow, with any uneven part at night. The split never changes the daily total.`]
+        ? [drug.splitPreference === 'fewest'
+          ? `6. Morning and night. Each daily dose is made from the fewest pieces, and those pieces are shared as evenly as they allow between morning and night, with any uneven part at night. The split never changes the daily total.`
+          : `6. Morning and night. Each daily dose is divided into the most even morning and night doses the pieces allow, even if that takes more pieces, with any uneven part at night. The split never changes the daily total.`]
         : [])
     ];
-  }, [wean, schedule.startingDose, intervalDays, unit, liquid, liquidIncrement, drug.dosesPerDay]);
+  }, [wean, schedule.startingDose, intervalDays, unit, liquid, liquidIncrement, drug.dosesPerDay, drug.splitPreference]);
 
   const totalsRows = useMemo(
     () =>
@@ -144,7 +159,7 @@ const CalculationBreakdown: React.FC<CalculationBreakdownProps> = ({ drug, wean,
     lines.push(`  ${END_REASON_TEXT[schedule.endReason]}`);
     lines.push('');
     lines.push('NUMERICAL NOTES');
-    lines.push('  Doses are quantised to 0.001 of a unit before the combination search, and results are rounded to 4 decimal places.');
+    lines.push('  Doses are quantised to 0.000001 of a unit before the combination search, and results are rounded to 4 decimal places.');
     lines.push('  Tablet splitting is assumed to be exact. In practice halves and quarters vary by roughly 10-20%, which matters most at the smallest doses.');
     if (schedule.warnings.length > 0) {
       lines.push('');
@@ -330,17 +345,18 @@ const CalculationBreakdown: React.FC<CalculationBreakdownProps> = ({ drug, wean,
             <h4 className="text-xs font-bold uppercase text-slate-500 dark:text-slate-400 mb-2">Numerical notes</h4>
             <ul className="list-disc list-inside space-y-1 text-xs text-slate-500 dark:text-slate-400">
               <li>
-                Doses are quantised to 0.001 of a unit before the combination search, and results are rounded
+                Doses are quantised to 0.000001 of a unit before the combination search, and results are rounded
                 to 4 decimal places.
               </li>
               <li>
                 Tablet splitting is assumed to be exact. In practice halves and quarters vary by roughly
                 10–20% of the intended piece, which matters most at the smallest doses.
               </li>
-              <li>
-                The plan gives a total daily dose. How it is divided across the day is a separate clinical
-                decision and is not modelled here.
-              </li>
+              {drug.dosesPerDay !== 2 && (
+                <li>
+                  The plan gives one daily dose. Choose "Morning + night" to divide it into two doses.
+                </li>
+              )}
             </ul>
           </section>
         </div>
