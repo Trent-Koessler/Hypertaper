@@ -7,6 +7,7 @@ import WeanChart from './components/WeanChart';
 import TabletVisualizer from './components/TabletVisualizer';
 import CalculationBreakdown from './components/CalculationBreakdown';
 import MathsExplainer from './components/MathsExplainer';
+import RoundingExplainer from './components/RoundingExplainer';
 import MaudsleyReference from './components/MaudsleyReference';
 import PatientHandout from './components/PatientHandout';
 import AppIcon from './components/AppIcon';
@@ -791,7 +792,10 @@ const App: React.FC = () => {
                </div>
 
                <div>
-                 <span className="block text-xs font-medium text-slate-500 dark:text-slate-400 uppercase mb-1">When Tablets Can't Match</span>
+                 <div className="flex items-center justify-between mb-1">
+                   <span className="block text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">When Tablets Can't Match</span>
+                   <RoundingExplainer />
+                 </div>
                  <div className="flex bg-slate-100 dark:bg-slate-700 p-1 rounded-lg" role="radiogroup" aria-label="When tablets can't match the target">
                    {(Object.keys(ROUNDING_TEXT) as DoseRounding[]).map(mode => (
                      <button
