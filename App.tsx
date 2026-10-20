@@ -156,7 +156,8 @@ const App: React.FC = () => {
     intervalDays: 14,
     minimumDoseThreshold: 0.5,
     reduceOnStartDate: false,
-    rounding: 'below'
+    // Tracks the curve most closely; steps may sit a little above it.
+    rounding: 'nearest'
   });
 
   const [isCustomDrug, setIsCustomDrug] = useState(false);

@@ -51,10 +51,10 @@ export type SplitPreference = 'even' | 'fewest';
 
 /**
  * Which achievable dose a step uses when the tablets cannot make the target.
- * 'below' (the default) takes the largest dose at or below the target, so the
+ * 'below' (the engine's default when unset) takes the largest dose at or below the target, so the
  * plan never prescribes more than the curve asks for, and each drop comes as
  * soon as the curve passes below the current dose. 'nearest' takes whichever
- * achievable dose is closest. 'hold' takes the smallest dose at or above the
+ * achievable dose is closest, and is what the app starts on. 'hold' takes the smallest dose at or above the
  * target, so each dose is held until the curve reaches the next one down.
  * In every mode a step never prescribes more than the step before it.
  */

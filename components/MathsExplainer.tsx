@@ -113,13 +113,13 @@ const MathsExplainer: React.FC = () => {
 
           <p className="text-sm text-slate-600 dark:text-slate-300">
             <strong className="text-slate-800 dark:text-slate-100">From curve to tablets.</strong>{' '}
-            The curve asks for doses no tablet can make. For each target the app finds the largest
-            dose your available tablets and splits can actually make <em>without going over</em>,
-            and holds it until the curve falls far enough to justify the next one. That's why the
-            plan is a staircase sitting just under a smooth curve — and why it warns you when coarse
-            tablet strengths force a drop much steeper than you asked for. If you'd rather round to
-            the nearest dose, or stay on each dose until the curve reaches the next one, change
-            "When Tablets Can't Match" in the settings.
+            The curve asks for doses no tablet can make. For each target the app finds the dose
+            your available tablets and splits can actually make that is <em>nearest</em> to it, and
+            holds it until the curve justifies the next one. That's why the plan is a staircase
+            that sits around a smooth curve — and why it warns you when coarse tablet strengths
+            force a drop much steeper than you asked for. If you'd rather never go above the curve,
+            or stay on each dose until the curve reaches the next one, change "When Tablets Can't
+            Match" in the settings.
           </p>
         </div>
       )}

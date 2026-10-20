@@ -11,7 +11,7 @@ HyperTaper is a pure client-side web application designed to assist clinicians i
   line up with when the patient is seen without back-dating the start date. Tablets for the
   current dose already being taken are not counted.
 - **Tablet Splitting Logic**: Automatically calculates fractional pill requirements based on available denominations and safe splitting practices.
-- **Never Overshoots (by default)**: Each step uses the largest dose the available tablets can actually make *without exceeding* the taper target. A "When Tablets Can't Match" setting can instead take the *nearest* achievable dose, or *hold* each dose until the curve reaches the next one down. In every mode the dose never steps up and never starts above the current dose.
+- **Tracks the Curve**: Each step uses the dose the available tablets can actually make that is *nearest* to the taper target. A "When Tablets Can't Match" setting can instead *stay under* the target (never prescribe more than the curve asks for), or *hold* each dose until the curve reaches the next one down. In every mode the dose never steps up and never starts above the current dose.
 - **Morning and Night Doses**: Divide each daily dose into the most even morning and night
   doses the tablet pieces (or liquid measures) allow, with any uneven part at night, as in the
   Maudsley tables. Each dose time lists its own tablets, and the plan warns when a dose cannot
@@ -49,11 +49,11 @@ HyperTaper is a pure client-side web application designed to assist clinicians i
    not by chaining off the previously prescribed one, so tablet rounding at one
    step never compounds through the rest of the curve.
 2. **Achievable dose.** For each target, an unbounded-knapsack search over the
-   available whole/half/quarter pieces returns the largest total that does not
-   exceed the target. By default it never rounds up, so no step can prescribe
-   more than the curve asks for. Optionally it takes the nearest achievable
-   total, or the smallest one at or above the target ("hold longer"); then the
-   taper stops once zero is the nearest achievable dose. Ties are broken
+   available whole/half/quarter pieces returns the achievable total nearest the
+   target (the lower one on a tie), and the taper stops once zero is the nearest
+   achievable dose. Optionally it takes the largest total that does not exceed
+   the target ("stay under", so no step prescribes more than the curve asks
+   for), or the smallest one at or above it ("hold longer"). Ties are broken
    towards the fewest pieces, then the fewest cuts.
 3. **Holding.** Consecutive intervals that resolve to the same achievable dose
    are merged into one held step.
