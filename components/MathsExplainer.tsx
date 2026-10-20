@@ -117,7 +117,9 @@ const MathsExplainer: React.FC = () => {
             dose your available tablets and splits can actually make <em>without going over</em>,
             and holds it until the curve falls far enough to justify the next one. That's why the
             plan is a staircase sitting just under a smooth curve — and why it warns you when coarse
-            tablet strengths force a drop much steeper than you asked for.
+            tablet strengths force a drop much steeper than you asked for. If you'd rather round to
+            the nearest dose, or stay on each dose until the curve reaches the next one, change
+            "When Tablets Can't Match" in the settings.
           </p>
         </div>
       )}

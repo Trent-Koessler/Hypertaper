@@ -104,6 +104,17 @@ describe('findBestTabletCombination', () => {
     expect(actualDose).toBe(28.125); // 3 quarters of 37.5
   });
 
+  it('makes exact quarter-tablet doses of very small strengths', () => {
+    // A quarter of 0.25mg is 0.0625mg; at a coarser resolution three quarters
+    // rounded past 0.1875mg and 1 3/4 tablets past 0.4375mg, so both were missed.
+    const small: Denomination[] = [{ id: '1', strength: 0.25, canSplit: 'quarter' }];
+    expect(findBestTabletCombination(0.1875, small).actualDose).toBe(0.1875);
+    expect(findBestTabletCombination(0.4375, small).actualDose).toBe(0.4375);
+    const tiny: Denomination[] = [{ id: '1', strength: 0.125, canSplit: 'quarter' }];
+    // Reported doses are rounded to 4 decimal places, so this one reads 0.0938.
+    expect(findBestTabletCombination(0.09375, tiny).actualDose).toBeCloseTo(0.09375, 4);
+  });
+
   it('stays fast with a large formulary', () => {
     const many: Denomination[] = [10, 5, 2, 1, 25, 50, 20, 15].map((s, i) => ({
       id: String(i), strength: s, canSplit: 'quarter'
@@ -173,6 +184,24 @@ describe('generateSchedule', () => {
     // 50mg and 25mg tablets can only express a 50% drop, not the 10% asked for.
     const result = generateSchedule(drug(DEFAULTS), wean());
     expect(result.warnings.join(' ')).toMatch(/force a 50% drop/i);
+  });
+
+  it('marks each step that drops far more steeply than requested', () => {
+    const result = generateSchedule(drug(DEFAULTS), wean());
+    const fiftyToTwentyFive = result.steps.find(s => s.actualDose === 25)!;
+    expect(fiftyToTwentyFive.steeperThanRequested).toBe(true);
+  });
+
+  it('judges steepness against the reduction asked for, not a fixed percentage', () => {
+    // A 20% taper on fine tablets drops about 20% each step: steeper than 15%,
+    // but what was asked for, so nothing is marked.
+    const result = generateSchedule(
+      drug([{ id: '1', strength: 1, canSplit: 'quarter' }], { currentDose: 20 }),
+      wean({ reductionValue: 20, minimumDoseThreshold: 10 })
+    );
+    const drops = result.steps.filter(s => !s.isStop && s.reductionPercent !== null);
+    expect(drops.some(s => s.reductionPercent! > 15)).toBe(true);
+    drops.forEach(s => expect(s.steeperThanRequested).toBe(false));
   });
 
   it('does not flag drops that track the requested reduction', () => {
@@ -693,5 +722,115 @@ describe('first reduction on the start date', () => {
   it('starts the ideal curve on the start date', () => {
     const result = generateSchedule(drug(FINE, { currentDose: 30 }), onStart());
     expect(result.targetCurve[0]).toEqual({ date: '2026-07-31', dose: 27 });
+  });
+});
+
+describe('dose rounding', () => {
+  const plan = (rounding: WeanConfig['rounding'], overrides: Partial<DrugConfig> = {}) =>
+    generateSchedule(drug(DEFAULTS, overrides), wean({ rounding, minimumDoseThreshold: 0 }));
+  const shape = (result: ReturnType<typeof generateSchedule>) =>
+    result.steps.filter(s => !s.isStop).map(s => [s.actualDose, s.durationDays]);
+
+  it('by default drops as soon as the curve passes below the current dose', () => {
+    // 50mg -> 45mg target: the only dose at or below it is 25mg.
+    expect(shape(plan(undefined))).toEqual([[50, 14], [25, 84]]);
+    expect(shape(plan('below'))).toEqual([[50, 14], [25, 84]]);
+  });
+
+  it('takes the closest achievable dose in nearest mode', () => {
+    // 36.45mg is the first target closer to 25mg than to 50mg; the taper stops
+    // once the target is closer to zero than to 25mg (below 12.5mg).
+    expect(shape(plan('nearest'))).toEqual([[50, 42], [25, 154]]);
+  });
+
+  it('holds each dose until the curve reaches the next one down in hold mode', () => {
+    // 50mg is held until the target reaches 25mg, and 25mg until the target is
+    // closer to zero than to 25mg.
+    expect(shape(plan('hold'))).toEqual([[50, 98], [25, 98]]);
+  });
+
+  it('never increases the dose or starts above the current dose', () => {
+    // 30mg cannot be made from these tablets; rounding up would give 50mg.
+    for (const rounding of ['nearest', 'hold'] as const) {
+      const result = plan(rounding, { currentDose: 30 });
+      expect(result.steps[0].actualDose).toBe(25);
+      result.steps.slice(1).forEach((step, i) =>
+        expect(step.actualDose).toBeLessThanOrEqual(result.steps[i].actualDose));
+    }
+  });
+
+  it('can prescribe above the curve only outside below mode', () => {
+    const above = (r: ReturnType<typeof generateSchedule>) => r.derivation.some(e => e.actualDose > e.targetDose);
+    expect(above(plan('below'))).toBe(false);
+    expect(above(plan('nearest'))).toBe(true);
+    expect(above(plan('hold'))).toBe(true);
+  });
+
+  it('rounds liquid measures the same way', () => {
+    const liquid: LiquidConfig = {
+      enabled: true, mode: 'whole', switchBelowDose: 0, maxTabletDropPercent: 15, concentration: 1, measureIncrementMl: 0.1
+    };
+    expect(findLiquidDose(1.86, liquid, false, 'below').actualDose).toBe(1.8);
+    expect(findLiquidDose(1.86, liquid, false, 'nearest').actualDose).toBe(1.9);
+    expect(findLiquidDose(1.82, liquid, false, 'nearest').actualDose).toBe(1.8);
+    expect(findLiquidDose(1.82, liquid, false, 'hold').actualDose).toBe(1.9);
+    // The last measure still ends the taper once zero is the nearest dose.
+    expect(findLiquidDose(0.04, liquid, false, 'hold').actualDose).toBe(0);
+  });
+
+  it('rounds tablet doses the same way', () => {
+    expect(findBestTabletCombination(45, DEFAULTS, false, { rounding: 'nearest' }).actualDose).toBe(50);
+    expect(findBestTabletCombination(36, DEFAULTS, false, { rounding: 'nearest' }).actualDose).toBe(25);
+    expect(findBestTabletCombination(26, DEFAULTS, false, { rounding: 'hold' }).actualDose).toBe(50);
+    expect(findBestTabletCombination(12, DEFAULTS, false, { rounding: 'hold' }).actualDose).toBe(0);
+  });
+});
+
+describe('twice-daily split preference', () => {
+  // A 10mg tablet that cannot be cut, and a 2mg one that can be halved.
+  const tabs: Denomination[] = [
+    { id: '10', strength: 10, canSplit: 'no' },
+    { id: '2', strength: 2, canSplit: 'half' }
+  ];
+
+  it('makes morning and night even by default, using more pieces if needed', () => {
+    const result = findBestTabletCombination(10, tabs, true);
+    expect(result.tablets).toEqual({ '2': 5 });
+    expect(result.split!.am.dose).toBe(5);
+    expect(result.split!.pm.dose).toBe(5);
+  });
+
+  it('keeps the fewest daily pieces when asked, even if the split is uneven', () => {
+    const result = findBestTabletCombination(10, tabs, true, { splitPreference: 'fewest' });
+    expect(result.tablets).toEqual({ '10': 1 });
+    expect(result.split!.am.dose).toBe(0);
+    expect(result.split!.pm.dose).toBe(10);
+  });
+
+  it('still shares the fewest pieces evenly when they allow it', () => {
+    const result = findBestTabletCombination(14, tabs, true, { splitPreference: 'fewest' });
+    // 10 + 2 + 2 is the fewest pieces; the most even share is 4mg and 10mg.
+    expect(result.tablets).toEqual({ '10': 1, '2': 2 });
+    expect([result.split!.am.dose, result.split!.pm.dose]).toEqual([4, 10]);
+    const halves = findBestTabletCombination(4, tabs, true, { splitPreference: 'fewest' });
+    expect([halves.split!.am.dose, halves.split!.pm.dose]).toEqual([2, 2]);
+  });
+
+  it('never changes the daily dose', () => {
+    for (const target of [3, 7, 10, 13, 21.5]) {
+      const even = findBestTabletCombination(target, tabs, true);
+      const fewest = findBestTabletCombination(target, tabs, true, { splitPreference: 'fewest' });
+      expect(fewest.actualDose).toBe(even.actualDose);
+      expect(fewest.split!.am.dose + fewest.split!.pm.dose).toBeCloseTo(fewest.actualDose, 9);
+      expect(fewest.split!.am.dose).toBeLessThanOrEqual(fewest.split!.pm.dose);
+    }
+  });
+
+  it('is used by the schedule', () => {
+    const result = generateSchedule(
+      drug(tabs, { currentDose: 10, dosesPerDay: 2, splitPreference: 'fewest' }),
+      wean()
+    );
+    expect(result.steps[0].tablets).toEqual({ '10': 1 });
   });
 });

@@ -9,7 +9,9 @@ import {
   DosePiece,
   DoseBreakdown,
   LiquidConfig,
-  SplitDose
+  SplitDose,
+  DoseRounding,
+  SplitPreference
 } from '../types';
 import { addDaysISO, formatDMY, isValidISODate, todayISO } from './dateUtils';
 
@@ -31,8 +33,12 @@ const COST_WHOLE = 100;
 const COST_HALF = 101;
 const COST_QUARTER = 102;
 
-/** Doses are quantised to this resolution (0.001 of a unit) before searching. */
-const SCALE = 1000;
+/**
+ * Doses are quantised to this resolution (0.000001 of a unit) before searching.
+ * Fine enough that a quarter of a 0.125mg tablet (0.03125) is exact; the GCD
+ * step below divides the scale back out, so it does not enlarge the DP table.
+ */
+const SCALE = 1_000_000;
 /** Upper bound on DP table size, so pathological strengths cannot hang the UI. */
 const MAX_STATES = 200_000;
 const MAX_ITERATIONS = 500;
@@ -99,52 +105,80 @@ export interface TabletCombination {
 
 const EMPTY_COMBINATION: TabletCombination = { actualDose: 0, tablets: {}, pieces: [] };
 
+export interface CombinationOptions {
+  /** Which achievable dose to take when the target cannot be made. Default 'below'. */
+  rounding?: DoseRounding;
+  /** How a twice-daily dose is shared when evenness costs extra pieces. Default 'even'. */
+  splitPreference?: SplitPreference;
+}
+
 /**
- * Finds the largest dose that is achievable with the available pieces and does
- * *not* exceed the target, preferring the fewest pieces and the fewest cuts.
- *
- * Deliberately never rounds up: a deprescribing plan must not instruct a dose
- * above the taper target. When nothing at or below the target can be made, the
- * result is 0, which is the signal that the taper has run out of room.
+ * Chooses between the nearest achievable doses below and above a target.
+ * Ties go to the lower dose. In 'hold' mode the dose above is used unless the
+ * nearest achievable dose is zero, so the last dose still ends the taper.
+ */
+function pickRounded(target: number, below: number, above: number | null, rounding: DoseRounding): 'below' | 'above' {
+  if (rounding === 'below' || above === null || above <= below + EPSILON) return 'below';
+  const aboveIsNearer = above - target < target - below - EPSILON;
+  if (rounding === 'nearest') return aboveIsNearer ? 'above' : 'below';
+  return below <= 0 && !aboveIsNearer ? 'below' : 'above';
+}
+
+/**
+ * Finds the achievable dose for a target, preferring the fewest pieces and the
+ * fewest cuts. By default ('below') it is the largest dose that does *not*
+ * exceed the target, and the result is 0 when nothing at or below the target
+ * can be made, which is the signal that the taper has run out of room. The
+ * other rounding modes may take the nearest dose above the target instead; see
+ * `DoseRounding`.
  *
  * Runs an unbounded-knapsack DP over doses quantised to a common unit, so cost
  * is O(states x pieces) rather than exponential in the number of denominations.
  *
- * With `split`, the same daily dose is then divided into a morning and a night
- * dose, each made of whole pieces. The split never changes the daily total —
- * any set of pieces can be shared between two doses — only how it is taken.
+ * With `split`, the daily dose is then divided into a morning and a night dose,
+ * each made of whole pieces. The split never changes the daily total. By
+ * default the most even split is chosen, even if that means more (smaller)
+ * pieces than the daily dose alone would need: a 10mg tablet that cannot be cut
+ * gives way to 2.5 x 2mg morning and night. `splitPreference: 'fewest'` keeps
+ * the fewest daily pieces instead and shares those as evenly as they allow.
  */
 export function findBestTabletCombination(
   targetDose: number,
   denominations: Denomination[],
-  split = false
+  split = false,
+  options: CombinationOptions = {}
 ): TabletCombination {
+  const rounding = options.rounding ?? 'below';
   if (!Number.isFinite(targetDose) || targetDose <= 0) return { ...EMPTY_COMBINATION };
 
   const pieces = buildPieces(denominations);
   if (pieces.length === 0) return { ...EMPTY_COMBINATION };
 
   const scaledTarget = Math.floor(targetDose * SCALE + 1e-6);
-  if (scaledTarget <= 0) return { ...EMPTY_COMBINATION };
-
   const scaledStrengths = pieces.map(p => Math.max(1, Math.round(p.strength * SCALE)));
+  // The nearest achievable dose above the target is less than one smallest
+  // piece above the nearest one below it, so that is as far as the search goes.
+  const searchTop = rounding === 'below'
+    ? scaledTarget
+    : Math.ceil(targetDose * SCALE - 1e-6) + Math.min(...scaledStrengths);
+  if (searchTop <= 0) return { ...EMPTY_COMBINATION };
 
   // Working in units of the greatest common divisor keeps the table tiny for
   // real-world strengths (a 0.5mg tablet split into quarters gives a 0.125 unit).
   let unit = scaledStrengths.reduce((a, b) => gcd(a, b));
-  unit = Math.max(unit, Math.ceil(scaledTarget / MAX_STATES));
+  unit = Math.max(unit, Math.ceil(searchTop / MAX_STATES));
 
   // Rounding each piece *up* to the grid guarantees the reconstructed exact dose
   // still lands at or below the target even when the grid has been coarsened.
   const pieceUnits = scaledStrengths.map(s => Math.ceil(s / unit));
-  const cap = Math.floor(scaledTarget / unit);
-  if (cap <= 0) return { ...EMPTY_COMBINATION };
+  const belowCap = Math.floor(scaledTarget / unit);
+  const tableCap = Math.max(belowCap, Math.floor(searchTop / unit));
 
-  const cost = new Int32Array(cap + 1).fill(UNREACHABLE);
-  const cameFrom = new Int32Array(cap + 1).fill(-1);
+  const cost = new Int32Array(tableCap + 1).fill(UNREACHABLE);
+  const cameFrom = new Int32Array(tableCap + 1).fill(-1);
   cost[0] = 0;
 
-  for (let value = 1; value <= cap; value++) {
+  for (let value = 1; value <= tableCap; value++) {
     let best = UNREACHABLE;
     let bestPiece = -1;
     for (let k = 0; k < pieceUnits.length; k++) {
@@ -162,10 +196,6 @@ export function findBestTabletCombination(
     cameFrom[value] = bestPiece;
   }
 
-  let value = cap;
-  while (value > 0 && cost[value] === UNREACHABLE) value--;
-  if (value === 0) return { ...EMPTY_COMBINATION };
-
   /** Walks the DP back from a grid value to the piece indexes that make it up. */
   const piecesFor = (start: number): Map<number, number> => {
     const counts = new Map<number, number>();
@@ -178,30 +208,101 @@ export function findBestTabletCombination(
     }
     return counts;
   };
+  const exactDose = (gridValue: number): number => {
+    let dose = 0;
+    piecesFor(gridValue).forEach((count, index) => { dose += pieces[index].strength * count; });
+    return dose;
+  };
+
+  let belowValue = Math.max(0, belowCap);
+  while (belowValue > 0 && cost[belowValue] === UNREACHABLE) belowValue--;
+  const belowDose = belowValue > 0 ? exactDose(belowValue) : 0;
+
+  let aboveValue = -1;
+  if (rounding !== 'below' && belowDose < targetDose - EPSILON) {
+    for (let candidate = belowValue + 1; candidate <= tableCap; candidate++) {
+      if (cost[candidate] !== UNREACHABLE && exactDose(candidate) >= targetDose - EPSILON) {
+        aboveValue = candidate;
+        break;
+      }
+    }
+  }
+  const aboveDose = aboveValue > 0 ? exactDose(aboveValue) : null;
+
+  const value = pickRounded(targetDose, belowDose, aboveDose, rounding) === 'above' ? aboveValue : belowValue;
+  if (value <= 0) return { ...EMPTY_COMBINATION };
 
   if (!split) {
     const daily = toBreakdown(pieces, piecesFor(value));
     return { actualDose: daily.dose, tablets: daily.tablets, pieces: daily.pieces };
   }
 
-  // The most even split: the largest morning dose that is no more than half the
-  // day and leaves an achievable night dose, so any uneven part goes at night.
-  // A zero morning dose is always possible, so this always finds a split.
-  for (let morning = Math.floor(value / 2); morning >= 0; morning--) {
-    if (cost[morning] === UNREACHABLE || cost[value - morning] === UNREACHABLE) continue;
-    const amCounts = piecesFor(morning);
-    const pmCounts = piecesFor(value - morning);
-    let am = toBreakdown(pieces, amCounts);
-    let pm = toBreakdown(pieces, pmCounts);
-    // Coarsened grids round pieces up, so exact doses can invert; night stays the larger.
-    if (am.dose > pm.dose) [am, pm] = [pm, am];
+  const [amCounts, pmCounts] = options.splitPreference === 'fewest'
+    ? shareFewestPieces(piecesFor(value), pieceUnits)
+    : splitMostEvenly(value, cost, piecesFor);
+  let am = toBreakdown(pieces, amCounts);
+  let pm = toBreakdown(pieces, pmCounts);
+  // Coarsened grids round pieces up, so exact doses can invert; night stays the larger.
+  if (am.dose > pm.dose) [am, pm] = [pm, am];
 
-    const dailyCounts = new Map(amCounts);
-    pmCounts.forEach((count, index) => dailyCounts.set(index, (dailyCounts.get(index) || 0) + count));
-    const daily = toBreakdown(pieces, dailyCounts);
-    return { actualDose: daily.dose, tablets: daily.tablets, pieces: daily.pieces, split: { am, pm } };
+  const dailyCounts = new Map(amCounts);
+  pmCounts.forEach((count, index) => dailyCounts.set(index, (dailyCounts.get(index) || 0) + count));
+  const daily = toBreakdown(pieces, dailyCounts);
+  return { actualDose: daily.dose, tablets: daily.tablets, pieces: daily.pieces, split: { am, pm } };
+}
+
+type PieceCounts = Map<number, number>;
+
+/**
+ * The most even split: the largest morning dose that is no more than half the
+ * day and leaves an achievable night dose, so any uneven part goes at night.
+ * Each half is made of its own fewest pieces. A zero morning dose is always
+ * possible, so this always finds a split.
+ */
+function splitMostEvenly(
+  value: number,
+  cost: Int32Array,
+  piecesFor: (gridValue: number) => PieceCounts
+): [PieceCounts, PieceCounts] {
+  for (let morning = Math.floor(value / 2); morning > 0; morning--) {
+    if (cost[morning] === UNREACHABLE || cost[value - morning] === UNREACHABLE) continue;
+    return [piecesFor(morning), piecesFor(value - morning)];
   }
-  return { ...EMPTY_COMBINATION };
+  return [new Map(), piecesFor(value)];
+}
+
+/**
+ * Shares one fixed set of daily pieces between morning and night as evenly as
+ * it can (a subset sum over the pieces), with any uneven part at night.
+ */
+function shareFewestPieces(daily: PieceCounts, pieceUnits: number[]): [PieceCounts, PieceCounts] {
+  const items: number[] = [];
+  daily.forEach((count, index) => { for (let i = 0; i < count; i++) items.push(index); });
+  const total = items.reduce((sum, index) => sum + pieceUnits[index], 0);
+  const half = Math.floor(total / 2);
+
+  // reachedBy[s] is the item that first made a morning total of s, or -1.
+  const reachedBy = new Int32Array(half + 1).fill(-1);
+  const BASE = -2;
+  reachedBy[0] = BASE;
+  items.forEach((index, item) => {
+    const size = pieceUnits[index];
+    for (let s = half; s >= size; s--) {
+      if (reachedBy[s] === -1 && reachedBy[s - size] !== -1) reachedBy[s] = item;
+    }
+  });
+
+  let morning = half;
+  while (morning > 0 && reachedBy[morning] === -1) morning--;
+  const am: PieceCounts = new Map();
+  const pm: PieceCounts = new Map(daily);
+  for (let s = morning; s > 0; s -= pieceUnits[items[reachedBy[s]]]) {
+    const index = items[reachedBy[s]];
+    am.set(index, (am.get(index) || 0) + 1);
+    pm.set(index, pm.get(index)! - 1);
+  }
+  pm.forEach((count, index) => { if (count === 0) pm.delete(index); });
+  return [am, pm];
 }
 
 /** Turns piece counts (by index into `pieces`) into a dose with its tablets and pieces. */
@@ -246,16 +347,24 @@ export function usesLiquid(liquid: LiquidConfig | undefined, targetDose: number)
 }
 
 /**
- * The largest liquid dose that is a whole number of measuring increments and
- * does not exceed the target. Like the tablet search, it never rounds up.
+ * A liquid dose that is a whole number of measuring increments. Like the
+ * tablet search, by default it is the largest that does not exceed the target;
+ * the other rounding modes may take the next measure up (see `DoseRounding`).
  */
-export function findLiquidDose(targetDose: number, liquid: LiquidConfig, split = false): TabletCombination {
+export function findLiquidDose(
+  targetDose: number,
+  liquid: LiquidConfig,
+  split = false,
+  rounding: DoseRounding = 'below'
+): TabletCombination {
   const increment = liquidDoseIncrement(liquid);
   if (!Number.isFinite(targetDose) || targetDose <= 0 || !(increment > 0)) return { ...EMPTY_COMBINATION };
 
-  // The small tolerance absorbs floating-point error (1.8 / 0.1 = 17.999...),
-  // not a real rounding up: it is far below any measurable volume.
-  const increments = Math.floor(targetDose / increment + 1e-9);
+  // The small tolerances absorb floating-point error (1.8 / 0.1 = 17.999...),
+  // not a real rounding: they are far below any measurable volume.
+  const below = Math.floor(targetDose / increment + 1e-9);
+  const above = Math.ceil(targetDose / increment - 1e-9);
+  const increments = pickRounded(targetDose, below * increment, above * increment, rounding) === 'above' ? above : below;
   if (increments <= 0) return { ...EMPTY_COMBINATION };
 
   const liquidMl = roundDose(increments * liquid.measureIncrementMl);
@@ -410,6 +519,12 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
   const startingDose = drug.currentDose;
   const unit = drug.unit;
   const splitDaily = drug.dosesPerDay === 2;
+  const rounding = wean.rounding ?? 'below';
+  const options: CombinationOptions = { rounding, splitPreference: drug.splitPreference };
+  const doseFor = (target: number, liquid: boolean, mode: DoseRounding = rounding): TabletCombination =>
+    liquid
+      ? findLiquidDose(target, drug.liquid!, splitDaily, mode)
+      : findBestTabletCombination(target, drug.denominations, splitDaily, { ...options, rounding: mode });
 
   // 1. Walk the taper curve, recording the achievable dose at each interval.
   //    The stop dose is inclusive: asking to stop at 5mg prescribes 5mg and
@@ -424,9 +539,13 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
     if (target <= EPSILON || target < threshold - EPSILON) break;
 
     const previousHold = holds[holds.length - 1];
-    let combination = onLiquid || usesLiquid(drug.liquid, target)
-      ? findLiquidDose(target, drug.liquid!, splitDaily)
-      : findBestTabletCombination(target, drug.denominations, splitDaily);
+    const liquidStep = onLiquid || usesLiquid(drug.liquid, target);
+    let combination = doseFor(target, liquidStep);
+    // Rounding up is only ever towards a dose already being taken; it must not
+    // start the plan above the current dose when that dose cannot be made.
+    if (!previousHold && combination.actualDose > startingDose + EPSILON) {
+      combination = doseFor(target, liquidStep, 'below');
+    }
 
     // In tolerance mode, the first tablet step that would drop by more than the
     // clinician's tolerance (or that the tablets cannot make at all) is given as
@@ -436,7 +555,7 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
       const drop = ((previousDose - combination.actualDose) / previousDose) * 100;
       if (combination.actualDose <= 0 || drop > drug.liquid.maxTabletDropPercent + EPSILON) {
         onLiquid = true;
-        combination = findLiquidDose(target, drug.liquid, splitDaily);
+        combination = doseFor(target, true);
       }
     }
 
@@ -614,19 +733,23 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
     );
   }
 
-  // The plan holds a dose until the curve falls far enough to justify the next
-  // achievable one, so a coarse formulary turns a gentle taper into a cliff.
-  // That is the clinically dangerous failure mode, and it is invisible from the
-  // requested percentage alone.
+  // The plan holds a dose until the curve justifies the next achievable one, so
+  // a coarse formulary turns a gentle taper into a cliff. That is the
+  // clinically dangerous failure mode, and it is invisible from the requested
+  // percentage alone, so each such step is flagged and the worst one reported.
+  steps.forEach(step => {
+    if (step.isStop || step.reductionPercent === null) return;
+    const requested = wean.reductionType === 'percentage'
+      ? wean.reductionValue
+      : (wean.reductionValue / (step.actualDose + (step.reductionFromPrevious ?? 0))) * 100;
+    step.steeperThanRequested = step.reductionPercent > requested * DROP_WARNING_RATIO;
+  });
   const worstDrop = steps
-    .filter(step => !step.isStop && step.reductionPercent !== null)
-    .reduce<ScheduleStep | null>((worst, step) => {
-      const requested = wean.reductionType === 'percentage'
-        ? wean.reductionValue
-        : (wean.reductionValue / (step.actualDose + (step.reductionFromPrevious ?? 0))) * 100;
-      if (step.reductionPercent! <= requested * DROP_WARNING_RATIO) return worst;
-      return !worst || step.reductionPercent! > worst.reductionPercent! ? step : worst;
-    }, null);
+    .filter(step => step.steeperThanRequested)
+    .reduce<ScheduleStep | null>(
+      (worst, step) => (!worst || step.reductionPercent! > worst.reductionPercent! ? step : worst),
+      null
+    );
 
   if (worstDrop) {
     const from = roundDose(worstDrop.actualDose + (worstDrop.reductionFromPrevious ?? 0));

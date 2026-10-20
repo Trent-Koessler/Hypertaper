@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Pill, Calculator, Calendar, Info, AlertCircle, AlertTriangle, Plus, Trash2, Printer, Scissors, Sun, Moon, Copy, Check, Droplet } from 'lucide-react';
-import { DrugConfig, WeanConfig, Denomination, ScheduleStep, LiquidConfig, DoseBreakdown } from './types';
+import { DrugConfig, WeanConfig, Denomination, ScheduleStep, LiquidConfig, DoseBreakdown, DoseRounding } from './types';
 import { generateSchedule } from './services/weaningLogic';
 import { formatISODate, todayISO } from './services/dateUtils';
 import WeanChart from './components/WeanChart';
@@ -55,6 +55,25 @@ const readStoredTheme = (): boolean => {
     // Storage can be unavailable (private mode, blocked cookies); fall through.
   }
   return typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches;
+};
+
+/** How each rounding mode is named and explained in the settings. */
+const ROUNDING_TEXT: Record<DoseRounding, { label: string; description: string; summary: string }> = {
+  below: {
+    label: 'Stay under',
+    description: 'Never above the curve. Each drop comes as soon as the curve passes below the current dose.',
+    summary: 'Each step uses the largest dose the available tablets can make without exceeding the target.'
+  },
+  nearest: {
+    label: 'Nearest',
+    description: 'Uses whichever dose is closest to the curve. Some steps sit a little above it.',
+    summary: 'Each step uses the achievable dose closest to the target, which may be slightly above it.'
+  },
+  hold: {
+    label: 'Hold longer',
+    description: 'Stays on each dose until the curve reaches the next one down. Steps sit on or above the curve.',
+    summary: 'Each dose is held until the target reaches the next achievable dose down.'
+  }
 };
 
 /** Formats a tablet count, hiding the decimals on whole numbers. */
@@ -126,7 +145,8 @@ const App: React.FC = () => {
       bottleSizeMl: 100
     },
     // Diazepam is usually divided morning and night, as in the Maudsley tables.
-    dosesPerDay: 2
+    dosesPerDay: 2,
+    splitPreference: 'even'
   });
 
   const [wean, setWean] = useState<WeanConfig>({
@@ -134,7 +154,8 @@ const App: React.FC = () => {
     reductionValue: 10,
     intervalDays: 14,
     minimumDoseThreshold: 0.5,
-    reduceOnStartDate: false
+    reduceOnStartDate: false,
+    rounding: 'below'
   });
 
   const [isCustomDrug, setIsCustomDrug] = useState(false);
@@ -223,6 +244,7 @@ const App: React.FC = () => {
   const liquidOn = !!liquid?.enabled;
   const liquidOnly = liquidOn && liquid!.mode === 'whole';
   const twiceDaily = drug.dosesPerDay === 2;
+  const rounding = wean.rounding ?? 'below';
 
   const handleDrugChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const val = e.target.value;
@@ -251,7 +273,8 @@ const App: React.FC = () => {
     text += `Start Dose: ${drug.currentDose}${drug.unit}\n`;
     text += `Reduction: ${wean.reductionType === 'percentage' ? `${wean.reductionValue}%` : `${wean.reductionValue}${drug.unit}`} every ${wean.intervalDays} days\n`;
     text += `Stop Dose: ${wean.minimumDoseThreshold}${drug.unit}\n`;
-    text += `Dosing: ${twiceDaily ? 'twice daily (morning and night)' : 'once daily'}\n`;
+    text += `Dosing: ${twiceDaily ? `twice daily (morning and night, ${drug.splitPreference === 'fewest' ? 'fewest pieces' : 'even doses'})` : 'once daily'}\n`;
+    if (rounding !== 'below') text += `When tablets can't match the target: ${ROUNDING_TEXT[rounding].label.toLowerCase()} (${ROUNDING_TEXT[rounding].summary})\n`;
     if (wean.reduceOnStartDate) text += `First reduction: on the start date (${drug.startDate})\n`;
     if (liquidOn) {
       text += `Liquid: ${liquid!.concentration}${drug.unit}/mL, measured to ${liquid!.measureIncrementMl}mL, `
@@ -315,7 +338,7 @@ const App: React.FC = () => {
     }
 
     return text;
-  }, [schedule, drug, wean, hasSchedule, liquid, liquidOn, liquidOnly, twiceDaily]);
+  }, [schedule, drug, wean, hasSchedule, liquid, liquidOn, liquidOnly, twiceDaily, rounding]);
 
   const copyEmrText = async () => {
     try {
@@ -489,6 +512,29 @@ const App: React.FC = () => {
                     </button>
                   ))}
                 </div>
+                {twiceDaily && (
+                  <>
+                    <span className="block text-xs font-medium text-slate-500 dark:text-slate-400 uppercase mt-3 mb-1">Morning + Night Split</span>
+                    <div className="flex bg-slate-100 dark:bg-slate-700 p-1 rounded-lg" role="radiogroup" aria-label="Morning and night split">
+                      {([['even', 'Even doses'], ['fewest', 'Fewest pieces']] as const).map(([preference, label]) => (
+                        <button
+                          key={preference}
+                          role="radio"
+                          aria-checked={(drug.splitPreference ?? 'even') === preference}
+                          onClick={() => setDrug(prev => ({ ...prev, splitPreference: preference }))}
+                          className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-all ${(drug.splitPreference ?? 'even') === preference ? 'bg-white dark:bg-slate-800 text-teal-600 dark:text-teal-400 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-xs text-slate-400 dark:text-slate-500 mt-1.5">
+                      {(drug.splitPreference ?? 'even') === 'even'
+                        ? 'Morning and night are kept as equal as possible, even if that takes more, smaller pieces.'
+                        : 'Uses the fewest pieces each day, then shares them as evenly as they allow. Morning and night may differ.'}
+                    </p>
+                  </>
+                )}
               </div>
 
               <div>
@@ -744,12 +790,30 @@ const App: React.FC = () => {
                  </div>
                </div>
 
+               <div>
+                 <span className="block text-xs font-medium text-slate-500 dark:text-slate-400 uppercase mb-1">When Tablets Can't Match</span>
+                 <div className="flex bg-slate-100 dark:bg-slate-700 p-1 rounded-lg" role="radiogroup" aria-label="When tablets can't match the target">
+                   {(Object.keys(ROUNDING_TEXT) as DoseRounding[]).map(mode => (
+                     <button
+                       key={mode}
+                       role="radio"
+                       aria-checked={rounding === mode}
+                       onClick={() => setWean(prev => ({ ...prev, rounding: mode }))}
+                       className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-all ${rounding === mode ? 'bg-white dark:bg-slate-800 text-teal-600 dark:text-teal-400 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+                     >
+                       {ROUNDING_TEXT[mode].label}
+                     </button>
+                   ))}
+                 </div>
+                 <p className="text-xs text-slate-400 dark:text-slate-500 mt-1.5">{ROUNDING_TEXT[rounding].description}</p>
+               </div>
+
                <div className="pt-2">
                  <p className="text-xs text-slate-400 flex items-start gap-1">
                    <Info size={14} className="mt-0.5 flex-shrink-0" />
                    {wean.reductionType === 'percentage'
-                    ? `Reduces the target dose by ${wean.reductionValue}% every ${wean.intervalDays} days until ${wean.minimumDoseThreshold}${drug.unit} is reached. Each step uses the largest dose the available tablets can make without exceeding the target.`
-                    : `Reduces the target dose by ${wean.reductionValue}${drug.unit} every ${wean.intervalDays} days until ${wean.minimumDoseThreshold}${drug.unit} is reached. Each step uses the largest dose the available tablets can make without exceeding the target.`}
+                    ? `Reduces the target dose by ${wean.reductionValue}% every ${wean.intervalDays} days until ${wean.minimumDoseThreshold}${drug.unit} is reached. ${ROUNDING_TEXT[rounding].summary}`
+                    : `Reduces the target dose by ${wean.reductionValue}${drug.unit} every ${wean.intervalDays} days until ${wean.minimumDoseThreshold}${drug.unit} is reached. ${ROUNDING_TEXT[rounding].summary}`}
                  </p>
                </div>
             </div>
@@ -908,8 +972,13 @@ const App: React.FC = () => {
                                      <AlertCircle size={10} /> {formatDose(step.targetDose - step.actualDose)}{drug.unit} below target
                                    </span>
                                  )}
+                                 {!step.isStop && step.actualDose > step.targetDose + 1e-9 && (
+                                   <span className="text-[10px] text-slate-400 dark:text-slate-500 mt-1">
+                                     {formatDose(step.actualDose - step.targetDose)}{drug.unit} above target
+                                   </span>
+                                 )}
                                  {!step.isStop && step.reductionPercent !== null && (
-                                   <span className={`text-[10px] mt-1 ${step.reductionPercent > 15 ? 'text-amber-500 font-semibold' : 'text-slate-400 dark:text-slate-500'}`}>
+                                   <span className={`text-[10px] mt-1 ${step.steeperThanRequested ? 'text-amber-500 font-semibold' : 'text-slate-400 dark:text-slate-500'}`}>
                                      ↓ {formatDose(step.reductionFromPrevious ?? 0, 3)}{drug.unit} ({formatDose(step.reductionPercent, 1)}%) from previous dose
                                    </span>
                                  )}

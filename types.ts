@@ -39,7 +39,26 @@ export interface DrugConfig {
   liquid?: LiquidConfig;
   /** 2 divides each daily dose into a morning and a night dose. Absent or 1 means once daily. */
   dosesPerDay?: 1 | 2;
+  /**
+   * How a twice-daily dose is divided when the two goals conflict. 'even'
+   * (the default) makes morning and night as equal as possible, even if that
+   * takes more pieces; 'fewest' keeps the fewest daily pieces and shares those.
+   */
+  splitPreference?: SplitPreference;
 }
+
+export type SplitPreference = 'even' | 'fewest';
+
+/**
+ * Which achievable dose a step uses when the tablets cannot make the target.
+ * 'below' (the default) takes the largest dose at or below the target, so the
+ * plan never prescribes more than the curve asks for, and each drop comes as
+ * soon as the curve passes below the current dose. 'nearest' takes whichever
+ * achievable dose is closest. 'hold' takes the smallest dose at or above the
+ * target, so each dose is held until the curve reaches the next one down.
+ * In every mode a step never prescribes more than the step before it.
+ */
+export type DoseRounding = 'below' | 'nearest' | 'hold';
 
 export interface WeanConfig {
   reductionType: 'percentage' | 'fixed';
@@ -52,6 +71,8 @@ export interface WeanConfig {
    * or absent, the current dose is held for one interval from the start date.
    */
   reduceOnStartDate?: boolean;
+  /** Absent means 'below'. */
+  rounding?: DoseRounding;
 }
 
 /** One physical piece counted towards a dose: a whole tablet, or a half/quarter. */
@@ -93,6 +114,8 @@ export interface ScheduleStep {
   reductionFromPrevious: number | null;
   /** The same drop as a percentage of the previously prescribed dose. */
   reductionPercent: number | null;
+  /** True when this drop is well beyond the requested reduction (1.5x or more). */
+  steeperThanRequested?: boolean;
   isStop: boolean;
 }
 
@@ -112,7 +135,7 @@ export interface DerivationEntry {
   /** "AM: ... | PM: ..." when dosing twice daily. */
   splitFormula?: string;
   pieces: DosePiece[];
-  shortfall: number; // targetDose - actualDose
+  shortfall: number; // targetDose - actualDose; negative when the dose is above the target
   startsNewStep: boolean; // False while the previous dose is still being held
   reductionFromPrevious: number | null;
   reductionPercent: number | null;
