@@ -269,6 +269,15 @@ const App: React.FC = () => {
     ? `${wean.reductionValue} occupancy points`
     : wean.reductionType === 'percentage' ? `${wean.reductionValue}%` : `${wean.reductionValue}${drug.unit}`;
 
+  /**
+   * Switching method also sets the schedule's occupancy tick-box: an occupancy
+   * taper is read in occupancy, the others in dose. It can still be changed by hand.
+   */
+  const chooseReductionType = (reductionType: WeanConfig['reductionType']) => {
+    setWean(prev => ({ ...prev, reductionType }));
+    setShowOccupancy(reductionType === 'occupancy');
+  };
+
   const handleDrugChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const val = e.target.value;
     if (val === 'Other') {
@@ -801,7 +810,7 @@ const App: React.FC = () => {
                   <button
                     role="radio"
                     aria-checked={wean.reductionType === 'percentage'}
-                    onClick={() => setWean({...wean, reductionType: 'percentage'})}
+                    onClick={() => chooseReductionType('percentage')}
                     className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-all ${wean.reductionType === 'percentage' ? 'bg-white dark:bg-slate-800 text-teal-600 dark:text-teal-400 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
                   >
                     Hyperbolic (%)
@@ -809,7 +818,7 @@ const App: React.FC = () => {
                   <button
                     role="radio"
                     aria-checked={wean.reductionType === 'fixed'}
-                    onClick={() => setWean({...wean, reductionType: 'fixed'})}
+                    onClick={() => chooseReductionType('fixed')}
                     className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-all ${wean.reductionType === 'fixed' ? 'bg-white dark:bg-slate-800 text-teal-600 dark:text-teal-400 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
                   >
                     Fixed Amount
@@ -817,7 +826,7 @@ const App: React.FC = () => {
                   <button
                     role="radio"
                     aria-checked={occupancyTaper}
-                    onClick={() => setWean({...wean, reductionType: 'occupancy'})}
+                    onClick={() => chooseReductionType('occupancy')}
                     className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-all ${occupancyTaper ? 'bg-white dark:bg-slate-800 text-teal-600 dark:text-teal-400 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
                   >
                     Occupancy
