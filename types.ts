@@ -45,6 +45,13 @@ export interface DrugConfig {
    * takes more pieces; 'fewest' keeps the fewest daily pieces and shares those.
    */
   splitPreference?: SplitPreference;
+  /**
+   * The daily dose that occupies half the target receptors (the Michaelis–Menten
+   * constant), in the dose unit. When set, the plan shows receptor occupancy
+   * alongside each dose; the 'occupancy' reduction type requires it. Absent or
+   * 0 means unknown.
+   */
+  ec50?: number;
 }
 
 export type SplitPreference = 'even' | 'fewest';
@@ -61,8 +68,13 @@ export type SplitPreference = 'even' | 'fewest';
 export type DoseRounding = 'below' | 'nearest' | 'hold';
 
 export interface WeanConfig {
-  reductionType: 'percentage' | 'fixed';
-  reductionValue: number; // e.g., 10 (percent) or 5 (mg)
+  /**
+   * 'percentage' cuts the dose by a fixed share each interval, 'fixed' by a
+   * fixed amount, and 'occupancy' cuts receptor occupancy by a fixed number of
+   * percentage points (which needs `DrugConfig.ec50`).
+   */
+  reductionType: 'percentage' | 'fixed' | 'occupancy';
+  reductionValue: number; // e.g., 10 (percent), 5 (mg) or 2.5 (occupancy points)
   intervalDays: number; // e.g., reduce every 14 days
   minimumDoseThreshold: number; // Lowest dose to prescribe before stopping (inclusive)
   /**

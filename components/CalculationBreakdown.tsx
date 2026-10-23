@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, Copy, Check, Sigma } from 'lucide-react';
 import { DrugConfig, WeanConfig, ScheduleResult } from '../types';
+import { hasEC50, receptorOccupancy } from '../services/occupancy';
 
 interface CalculationBreakdownProps {
   drug: DrugConfig;
@@ -35,11 +36,18 @@ const CalculationBreakdown: React.FC<CalculationBreakdownProps> = ({ drug, wean,
   const intervalDays = Math.max(1, Math.round(wean.intervalDays || 1));
   // With the first reduction on the start date, interval 0 was taken before the plan began.
   const planIntervals = schedule.derivation.length - (wean.reduceOnStartDate ? 1 : 0);
+  const ec50 = hasEC50(drug.ec50) ? drug.ec50 : null;
+  const occupancyOf = (dose: number): string => (ec50 === null ? '' : `${num(receptorOccupancy(dose, ec50), 1)}%`);
+  const reductionText = wean.reductionType === 'percentage'
+    ? `${num(wean.reductionValue)}%`
+    : wean.reductionType === 'occupancy' ? `${num(wean.reductionValue)} occupancy pts` : `${num(wean.reductionValue)}${unit}`;
 
   const methodLines = useMemo(() => {
     const curve = wean.reductionType === 'percentage'
       ? `target(n) = ${num(schedule.startingDose)} x (1 - ${num(wean.reductionValue)}/100)^n`
-      : `target(n) = ${num(schedule.startingDose)} - (n x ${num(wean.reductionValue)})`;
+      : wean.reductionType === 'occupancy' && ec50 !== null
+        ? `occupancy(n) = ${num(receptorOccupancy(schedule.startingDose, ec50), 2)} - (n x ${num(wean.reductionValue)}) percent, where ${num(receptorOccupancy(schedule.startingDose, ec50), 2)}% = 100 x ${num(schedule.startingDose)} / (${num(schedule.startingDose)} + ${num(ec50)}) is the occupancy of the starting dose. Each occupancy is turned back into a dose with target(n) = ${num(ec50)} x occupancy(n) / (100 - occupancy(n)), the Michaelis-Menten model with an EC50 of ${num(ec50)}${unit}`
+        : `target(n) = ${num(schedule.startingDose)} - (n x ${num(wean.reductionValue)})`;
 
     const rounding = wean.rounding ?? 'below';
     const choice = {
@@ -66,7 +74,7 @@ const CalculationBreakdown: React.FC<CalculationBreakdownProps> = ({ drug, wean,
           : `6. Morning and night. Each daily dose is divided into the most even morning and night doses the pieces allow, even if that takes more pieces, with any uneven part at night. The split never changes the daily total.`]
         : [])
     ];
-  }, [wean, schedule.startingDose, intervalDays, unit, liquid, liquidIncrement, drug.dosesPerDay, drug.splitPreference]);
+  }, [wean, schedule.startingDose, intervalDays, unit, liquid, liquidIncrement, drug.dosesPerDay, drug.splitPreference, ec50]);
 
   const totalsRows = useMemo(
     () =>
@@ -100,8 +108,9 @@ const CalculationBreakdown: React.FC<CalculationBreakdownProps> = ({ drug, wean,
     lines.push(`  Drug: ${drug.name || '(unnamed)'}`);
     lines.push(`  Starting dose: ${num(schedule.startingDose)}${unit}`);
     lines.push(
-      `  Reduction: ${wean.reductionType === 'percentage' ? `${num(wean.reductionValue)}% of the starting dose, compounded` : `${num(wean.reductionValue)}${unit}, fixed`} every ${intervalDays} day(s)`
+      `  Reduction: ${wean.reductionType === 'percentage' ? `${num(wean.reductionValue)}% of the starting dose, compounded` : wean.reductionType === 'occupancy' ? `${num(wean.reductionValue)} percentage points of receptor occupancy` : `${num(wean.reductionValue)}${unit}, fixed`} every ${intervalDays} day(s)`
     );
+    if (ec50 !== null) lines.push(`  Dose for 50% receptor occupancy (EC50): ${num(ec50)}${unit}/day`);
     lines.push(`  Stop dose: ${num(wean.minimumDoseThreshold)}${unit} (inclusive)`);
     lines.push(`  Start date: ${drug.startDate}`);
     lines.push('  Available pieces:');
@@ -126,7 +135,8 @@ const CalculationBreakdown: React.FC<CalculationBreakdownProps> = ({ drug, wean,
     lines.push('');
     lines.push('INTERVAL-BY-INTERVAL DERIVATION');
     lines.push(
-      '  n   Date        Target                          Prescribed                        Short   Change     % start'
+      '  n   Date        Target                          Prescribed                        Short   Change     % start' +
+        (ec50 !== null ? '  Occupancy' : '')
     );
     schedule.derivation.forEach(entry => {
       const change = entry.reductionPercent === null
@@ -140,7 +150,8 @@ const CalculationBreakdown: React.FC<CalculationBreakdownProps> = ({ drug, wean,
           (entry.startsNewStep ? entry.actualFormula : `(held) ${num(entry.actualDose)}${unit}`).padEnd(34) +
           `${num(entry.shortfall, 3)}`.padEnd(8) +
           change.padEnd(11) +
-          `${num(entry.percentOfStartingDose, 1)}%`
+          `${num(entry.percentOfStartingDose, 1)}%`.padEnd(ec50 !== null ? 9 : 0) +
+          (ec50 !== null ? occupancyOf(entry.actualDose) : '')
       );
       if (entry.startsNewStep && entry.splitFormula) lines.push(`      ${entry.splitFormula}`);
     });
@@ -167,7 +178,7 @@ const CalculationBreakdown: React.FC<CalculationBreakdownProps> = ({ drug, wean,
       schedule.warnings.forEach(w => lines.push(`  - ${w}`));
     }
     return lines.join('\n');
-  }, [drug, wean, schedule, unit, intervalDays, methodLines, totalsRows, liquid, liquidIncrement, liquidTerms]);
+  }, [drug, wean, schedule, unit, intervalDays, methodLines, totalsRows, liquid, liquidIncrement, liquidTerms, ec50]);
 
   const copy = async () => {
     try {
@@ -219,7 +230,7 @@ const CalculationBreakdown: React.FC<CalculationBreakdownProps> = ({ drug, wean,
               <div className="flex justify-between border-b border-slate-100 dark:border-slate-700 py-1">
                 <dt>Reduction</dt>
                 <dd className="font-mono">
-                  {wean.reductionType === 'percentage' ? `${num(wean.reductionValue)}%` : `${num(wean.reductionValue)}${unit}`} / {intervalDays}d
+                  {reductionText} / {intervalDays}d
                 </dd>
               </div>
               <div className="flex justify-between border-b border-slate-100 dark:border-slate-700 py-1">
@@ -230,6 +241,12 @@ const CalculationBreakdown: React.FC<CalculationBreakdownProps> = ({ drug, wean,
                 <dt>Start date</dt>
                 <dd className="font-mono">{drug.startDate}</dd>
               </div>
+              {ec50 !== null && (
+                <div className="flex justify-between border-b border-slate-100 dark:border-slate-700 py-1">
+                  <dt>Dose for 50% occupancy (EC50)</dt>
+                  <dd className="font-mono">{num(ec50)}{unit}/day</dd>
+                </div>
+              )}
             </dl>
             <div className="mt-3">
               <span className="text-xs text-slate-500 dark:text-slate-400">Pieces available each day:</span>
@@ -272,6 +289,7 @@ const CalculationBreakdown: React.FC<CalculationBreakdownProps> = ({ drug, wean,
                     <th scope="col" className="py-2 pr-3 text-right">Short by</th>
                     <th scope="col" className="py-2 pr-3 text-right">Change</th>
                     <th scope="col" className="py-2 text-right">% of start</th>
+                    {ec50 !== null && <th scope="col" className="py-2 pl-3 text-right">Occupancy</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
@@ -294,6 +312,7 @@ const CalculationBreakdown: React.FC<CalculationBreakdownProps> = ({ drug, wean,
                         {entry.reductionPercent === null ? '—' : `−${num(entry.reductionPercent, 1)}%`}
                       </td>
                       <td className="py-1.5 text-right">{num(entry.percentOfStartingDose, 1)}%</td>
+                      {ec50 !== null && <td className="py-1.5 pl-3 text-right">{occupancyOf(entry.actualDose)}</td>}
                     </tr>
                   ))}
                 </tbody>
@@ -352,6 +371,13 @@ const CalculationBreakdown: React.FC<CalculationBreakdownProps> = ({ drug, wean,
                 Tablet splitting is assumed to be exact. In practice halves and quarters vary by roughly
                 10–20% of the intended piece, which matters most at the smallest doses.
               </li>
+              {ec50 !== null && (
+                <li>
+                  Receptor occupancy is an estimate from the Michaelis-Menten model, 100 × dose ÷ (dose + EC50),
+                  using the EC50 entered. It is not measured in the patient, and published EC50 values vary
+                  between studies.
+                </li>
+              )}
               {drug.dosesPerDay !== 2 && (
                 <li>
                   The plan gives one daily dose. Choose "Morning + night" to divide it into two doses.

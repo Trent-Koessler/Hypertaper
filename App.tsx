@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Pill, Calculator, Calendar, Info, AlertCircle, AlertTriangle, Plus, Trash2, Printer, Scissors, Sun, Moon, Copy, Check, Droplet } from 'lucide-react';
 import { DrugConfig, WeanConfig, Denomination, ScheduleStep, LiquidConfig, DoseBreakdown, DoseRounding } from './types';
 import { generateSchedule } from './services/weaningLogic';
+import { KNOWN_EC50_MG, hasEC50, receptorOccupancy } from './services/occupancy';
 import { formatISODate, todayISO } from './services/dateUtils';
 import WeanChart from './components/WeanChart';
 import TabletVisualizer from './components/TabletVisualizer';
@@ -115,6 +116,13 @@ const describeTablets = (
     .filter(Boolean)
     .join(', ') || 'none';
 
+/** The EC50 to start from when a drug is chosen: a published value, or 0 for unknown. */
+const knownEC50 = (name: string, unit: string): number => {
+  const mg = KNOWN_EC50_MG[name];
+  if (mg === undefined) return 0;
+  return unit === 'mcg' ? mg * 1000 : mg;
+};
+
 const describeDuration = (days: number): string => {
   if (days % 7 === 0 && days >= 7) {
     const weeks = days / 7;
@@ -147,7 +155,8 @@ const App: React.FC = () => {
     },
     // Diazepam is usually divided morning and night, as in the Maudsley tables.
     dosesPerDay: 2,
-    splitPreference: 'even'
+    splitPreference: 'even',
+    ec50: KNOWN_EC50_MG.Diazepam
   });
 
   const [wean, setWean] = useState<WeanConfig>({
@@ -205,6 +214,7 @@ const App: React.FC = () => {
       ...prev,
       name: 'Diazepam',
       unit: 'mg',
+      ec50: KNOWN_EC50_MG.Diazepam,
       currentDose: regimen.steps[0].total,
       denominations: MAUDSLEY_TABLET_STRENGTHS.map((strength, index) => ({
         id: `maudsley-${index}`,
@@ -247,15 +257,23 @@ const App: React.FC = () => {
   const liquidOnly = liquidOn && liquid!.mode === 'whole';
   const twiceDaily = drug.dosesPerDay === 2;
   const rounding = wean.rounding ?? 'below';
+  const ec50 = hasEC50(drug.ec50) ? drug.ec50 : null;
+  /** Receptor occupancy at a dose, as shown in the plan, or null when no EC50 is set. */
+  const occupancyAt = (dose: number): number | null => (ec50 === null ? null : receptorOccupancy(dose, ec50));
+  const occupancyTaper = wean.reductionType === 'occupancy';
+  const reductionText = occupancyTaper
+    ? `${wean.reductionValue} occupancy points`
+    : wean.reductionType === 'percentage' ? `${wean.reductionValue}%` : `${wean.reductionValue}${drug.unit}`;
 
   const handleDrugChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const val = e.target.value;
     if (val === 'Other') {
       setIsCustomDrug(true);
-      setDrug(prev => ({ ...prev, name: '' }));
+      setDrug(prev => ({ ...prev, name: '', ec50: 0 }));
     } else {
       setIsCustomDrug(false);
-      setDrug(prev => ({ ...prev, name: val }));
+      // An EC50 belongs to one drug, so a new drug starts from its own (or none).
+      setDrug(prev => ({ ...prev, name: val, ec50: knownEC50(val, prev.unit) }));
     }
   };
 
@@ -268,12 +286,18 @@ const App: React.FC = () => {
 
     const dateColWidth = 18;
     const doseColWidth = 12;
+    const occupancyColWidth = ec50 !== null ? 11 : 0;
     const durationColWidth = 12;
+    const occupancyCol = (dose: number): string =>
+      ec50 !== null ? `${formatDose(receptorOccupancy(dose, ec50), 1)}%`.padEnd(occupancyColWidth) : '';
 
     let text = `Medication Taper Plan\n`;
     text += `Drug: ${drug.name || '(unnamed)'}\n`;
     text += `Start Dose: ${drug.currentDose}${drug.unit}\n`;
-    text += `Reduction: ${wean.reductionType === 'percentage' ? `${wean.reductionValue}%` : `${wean.reductionValue}${drug.unit}`} every ${wean.intervalDays} days\n`;
+    text += `Reduction: ${reductionText} every ${wean.intervalDays} days\n`;
+    if (ec50 !== null) {
+      text += `Receptor occupancy: estimated as 100 x dose / (dose + ${ec50}${drug.unit}), the dose for 50% occupancy (EC50)\n`;
+    }
     text += `Stop Dose: ${wean.minimumDoseThreshold}${drug.unit}\n`;
     text += `Dosing: ${twiceDaily ? `twice daily (morning and night, ${drug.splitPreference === 'fewest' ? 'fewest pieces' : 'even doses'})` : 'once daily'}\n`;
     if (rounding !== 'below') text += `When tablets can't match the target: ${ROUNDING_TEXT[rounding].label.toLowerCase()} (${ROUNDING_TEXT[rounding].summary})\n`;
@@ -288,7 +312,8 @@ const App: React.FC = () => {
     }
     text += `\n`;
 
-    text += `Date`.padEnd(dateColWidth) + `Dose`.padEnd(doseColWidth) + `For`.padEnd(durationColWidth) + `Instructions\n`;
+    text += `Date`.padEnd(dateColWidth) + `Dose`.padEnd(doseColWidth) + (ec50 !== null ? `Occupancy`.padEnd(occupancyColWidth) : '')
+      + `For`.padEnd(durationColWidth) + `Instructions\n`;
     text += `-`.repeat(80) + `\n`;
 
     schedule.steps.forEach(step => {
@@ -296,7 +321,7 @@ const App: React.FC = () => {
       const dateStr = formatISODate(step.date, { year: 'numeric', month: 'short', day: '2-digit' });
 
       if (step.isStop) {
-        text += dateStr.padEnd(dateColWidth) + `STOP`.padEnd(doseColWidth) + `-`.padEnd(durationColWidth) + `Cease medication\n`;
+        text += dateStr.padEnd(dateColWidth) + `STOP`.padEnd(doseColWidth) + occupancyCol(0) + `-`.padEnd(durationColWidth) + `Cease medication\n`;
         return;
       }
 
@@ -309,6 +334,7 @@ const App: React.FC = () => {
 
       text += dateStr.padEnd(dateColWidth)
         + `${formatDose(step.actualDose, 3)}${drug.unit}`.padEnd(doseColWidth)
+        + occupancyCol(step.actualDose)
         + describeDuration(step.durationDays).padEnd(durationColWidth)
         + `${instruction}\n`;
     });
@@ -340,7 +366,7 @@ const App: React.FC = () => {
     }
 
     return text;
-  }, [schedule, drug, wean, hasSchedule, liquid, liquidOn, liquidOnly, twiceDaily, rounding]);
+  }, [schedule, drug, wean, hasSchedule, liquid, liquidOn, liquidOnly, twiceDaily, rounding, ec50, reductionText]);
 
   const copyEmrText = async () => {
     try {
@@ -717,6 +743,32 @@ const App: React.FC = () => {
                   )}
                 </div>
               )}
+
+              {/* Receptor occupancy (Michaelis–Menten) */}
+              <div className="pt-4 border-t border-slate-200 dark:border-slate-700">
+                <label htmlFor="ec50" className="block text-xs font-medium text-slate-500 dark:text-slate-400 uppercase mb-1">
+                  Receptor Occupancy: Dose for 50% (EC50)
+                </label>
+                <div className="flex items-center gap-2">
+                  <NumberInput
+                    id="ec50"
+                    min="0"
+                    step="any"
+                    placeholder="Not set"
+                    value={drug.ec50 || undefined}
+                    onChange={v => setDrug(prev => ({ ...prev, ec50: v }))}
+                    className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-100"
+                  />
+                  <span className="text-sm text-slate-400 whitespace-nowrap">{drug.unit}/day</span>
+                </div>
+                <p className="text-xs text-slate-400 dark:text-slate-500 mt-1.5">
+                  {ec50 === null
+                    ? 'Enter a published value to show the estimated receptor occupancy of each dose. Leave blank to hide it.'
+                    : `Occupancy = 100 × dose ÷ (dose + ${formatDose(ec50, 3)}). The current dose is about ${formatDose(receptorOccupancy(drug.currentDose, ec50), 1)}% occupancy.`}
+                  {drug.name === 'Diazepam' && drug.unit === 'mg' &&
+                    ` ${KNOWN_EC50_MG.Diazepam}mg/day fits every occupancy figure in the Maudsley diazepam tables.`}
+                </p>
+              </div>
             </div>
           </div>
 
@@ -747,13 +799,21 @@ const App: React.FC = () => {
                   >
                     Fixed Amount
                   </button>
+                  <button
+                    role="radio"
+                    aria-checked={occupancyTaper}
+                    onClick={() => setWean({...wean, reductionType: 'occupancy'})}
+                    className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-all ${occupancyTaper ? 'bg-white dark:bg-slate-800 text-teal-600 dark:text-teal-400 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+                  >
+                    Occupancy
+                  </button>
                 </div>
                </div>
 
                <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label htmlFor="reduction-value" className="block text-xs font-medium text-slate-500 dark:text-slate-400 uppercase mb-1">
-                      {wean.reductionType === 'percentage' ? 'Reduction %' : `Amount (${drug.unit})`}
+                      {wean.reductionType === 'percentage' ? 'Reduction %' : occupancyTaper ? 'Occupancy points' : `Amount (${drug.unit})`}
                     </label>
                     <NumberInput
                       id="reduction-value"
@@ -816,9 +876,9 @@ const App: React.FC = () => {
                <div className="pt-2">
                  <p className="text-xs text-slate-400 flex items-start gap-1">
                    <Info size={14} className="mt-0.5 flex-shrink-0" />
-                   {wean.reductionType === 'percentage'
-                    ? `Reduces the target dose by ${wean.reductionValue}% every ${wean.intervalDays} days until ${wean.minimumDoseThreshold}${drug.unit} is reached. ${ROUNDING_TEXT[rounding].summary}`
-                    : `Reduces the target dose by ${wean.reductionValue}${drug.unit} every ${wean.intervalDays} days until ${wean.minimumDoseThreshold}${drug.unit} is reached. ${ROUNDING_TEXT[rounding].summary}`}
+                   {occupancyTaper
+                    ? `Lowers estimated receptor occupancy by ${wean.reductionValue} percentage points every ${wean.intervalDays} days${ec50 !== null ? ` (from ${formatDose(receptorOccupancy(drug.currentDose, ec50), 1)}%)` : ''}, so the dose cuts get smaller as the dose falls, until ${wean.minimumDoseThreshold}${drug.unit} is reached. ${ROUNDING_TEXT[rounding].summary}`
+                    : `Reduces the target dose by ${reductionText} every ${wean.intervalDays} days until ${wean.minimumDoseThreshold}${drug.unit} is reached. ${ROUNDING_TEXT[rounding].summary}`}
                  </p>
                </div>
             </div>
@@ -919,6 +979,7 @@ const App: React.FC = () => {
                   endDate={schedule.endDate}
                   isDarkMode={isDarkMode}
                   reference={referenceCurve}
+                  ec50={ec50}
                 />
 
                 <CalculationBreakdown drug={drug} wean={wean} schedule={schedule} />
@@ -972,6 +1033,11 @@ const App: React.FC = () => {
                                      Target: {formatDose(step.targetDose)}{drug.unit}
                                    </span>
                                  )}
+                                 {occupancyAt(step.actualDose) !== null && (
+                                   <span className="text-xs text-violet-600 dark:text-violet-300">
+                                     Occupancy: {formatDose(occupancyAt(step.actualDose)!, 1)}%
+                                   </span>
+                                 )}
                                  {!step.isStop && step.actualDose < step.targetDose * 0.9 && (
                                    <span className="text-[10px] text-amber-500 flex items-center gap-1 mt-1">
                                      <AlertCircle size={10} /> {formatDose(step.targetDose - step.actualDose)}{drug.unit} below target
@@ -984,7 +1050,8 @@ const App: React.FC = () => {
                                  )}
                                  {!step.isStop && step.reductionPercent !== null && (
                                    <span className={`text-[10px] mt-1 ${step.steeperThanRequested ? 'text-amber-500 font-semibold' : 'text-slate-400 dark:text-slate-500'}`}>
-                                     ↓ {formatDose(step.reductionFromPrevious ?? 0, 3)}{drug.unit} ({formatDose(step.reductionPercent, 1)}%) from previous dose
+                                     ↓ {formatDose(step.reductionFromPrevious ?? 0, 3)}{drug.unit} ({formatDose(step.reductionPercent, 1)}%
+                                     {ec50 !== null && `, ${formatDose(receptorOccupancy(step.actualDose + (step.reductionFromPrevious ?? 0), ec50) - receptorOccupancy(step.actualDose, ec50), 1)} occupancy pts`}) from previous dose
                                    </span>
                                  )}
                               </div>

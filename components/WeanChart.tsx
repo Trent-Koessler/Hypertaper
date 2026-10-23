@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { ScheduleResult } from '../types';
 import { addDaysISO, parseISODateLocal } from '../services/dateUtils';
+import { receptorOccupancy } from '../services/occupancy';
 
 interface WeanChartProps {
   steps: ScheduleResult['steps'];
@@ -17,6 +18,8 @@ interface WeanChartProps {
    * Its doses are the source's, sampled at the plan's own reduction interval.
    */
   reference?: { name: string; points: { dayIndex: number; dose: number }[] } | null;
+  /** Dose for 50% receptor occupancy; when set, the y axis can show occupancy. */
+  ec50?: number | null;
 }
 
 interface ChartPoint {
@@ -28,7 +31,7 @@ interface ChartPoint {
 
 type TickMode = 'auto' | 'day' | 'week' | 'month';
 type YScale = 'linear' | 'log';
-type YUnit = 'dose' | 'percent';
+type YUnit = 'dose' | 'percent' | 'occupancy';
 type WindowPreset = 'full' | 'first12' | 'last12' | 'custom';
 
 const DAY_MS = 86_400_000;
@@ -120,11 +123,14 @@ const WeanChart: React.FC<WeanChartProps> = ({
   startDate,
   endDate,
   isDarkMode,
-  reference
+  reference,
+  ec50
 }) => {
   const [tickMode, setTickMode] = useState<TickMode>('auto');
   const [yScale, setYScale] = useState<YScale>('linear');
-  const [yUnit, setYUnit] = useState<YUnit>('dose');
+  const [chosenYUnit, setYUnit] = useState<YUnit>('dose');
+  // Occupancy needs an EC50; if it is cleared, fall back to dose.
+  const yUnit: YUnit = chosenYUnit === 'occupancy' && !ec50 ? 'dose' : chosenYUnit;
   const [showPrescribed, setShowPrescribed] = useState(true);
   const [showIdeal, setShowIdeal] = useState(true);
   const [showReference, setShowReference] = useState(true);
@@ -199,8 +205,9 @@ const WeanChart: React.FC<WeanChartProps> = ({
   const [from, to] = windowFrom <= windowTo ? [windowFrom, windowTo] : [windowTo, windowFrom];
 
   const scaleValue = (value: number | undefined): number | undefined =>
-    value === undefined ? undefined : yUnit === 'percent' && startingDose > 0
-      ? parseFloat(((value / startingDose) * 100).toFixed(2))
+    value === undefined ? undefined
+      : yUnit === 'occupancy' && ec50 ? parseFloat(receptorOccupancy(value, ec50).toFixed(2))
+      : yUnit === 'percent' && startingDose > 0 ? parseFloat(((value / startingDose) * 100).toFixed(2))
       : value;
 
   const data = useMemo(() => {
@@ -253,13 +260,13 @@ const WeanChart: React.FC<WeanChartProps> = ({
         reference: p.reference === 0 ? lastReference : p.reference
       };
     });
-  }, [allPoints, from, to, yScale, yUnit, startingDose]);
+  }, [allPoints, from, to, yScale, yUnit, startingDose, ec50]);
 
   const ticks = useMemo(() => buildTicks(from, to, tickMode), [from, to, tickMode]);
 
   const axisColor = '#94a3b8';
-  const yLabel = yUnit === 'percent' ? '% of start' : unit;
-  const valueSuffix = yUnit === 'percent' ? '% of start' : unit;
+  const yLabel = yUnit === 'percent' ? '% of start' : yUnit === 'occupancy' ? '% occupancy' : unit;
+  const valueSuffix = yLabel;
   const hasZeroDose =
     yScale === 'log' && allPoints.some(p => p.dose === 0 || (p.reference !== undefined && p.reference === 0));
 
@@ -340,6 +347,7 @@ const WeanChart: React.FC<WeanChartProps> = ({
           <select value={yUnit} onChange={e => setYUnit(e.target.value as YUnit)} className={controlClass}>
             <option value="dose">Dose ({unit})</option>
             <option value="percent">% of starting dose</option>
+            {!!ec50 && <option value="occupancy">Receptor occupancy (%)</option>}
           </select>
         </label>
         <label className="flex flex-col gap-1">
@@ -372,6 +380,13 @@ const WeanChart: React.FC<WeanChartProps> = ({
           On a log axis a constant-percentage taper is a straight line, which makes any deviation from the
           intended curve obvious.
           {hasZeroDose && ' Zero cannot be plotted on a log axis, so the final dose is drawn holding to the cessation date rather than dropping to it.'}
+        </p>
+      )}
+
+      {yUnit === 'occupancy' && (
+        <p className="text-[11px] text-slate-400 dark:text-slate-500 mb-2">
+          Estimated receptor occupancy, 100 × dose ÷ (dose + {ec50}{unit}). On a linear scale, an occupancy
+          taper&apos;s ideal target is a straight line.
         </p>
       )}
 

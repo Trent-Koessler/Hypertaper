@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { generateSchedule, findBestTabletCombination, findLiquidDose } from './weaningLogic';
 import { DrugConfig, WeanConfig, Denomination, LiquidConfig } from '../types';
+import { receptorOccupancy } from './occupancy';
 
 const drug = (denominations: Denomination[], overrides: Partial<DrugConfig> = {}): DrugConfig => ({
   name: 'Test',
@@ -832,5 +833,58 @@ describe('twice-daily split preference', () => {
       wean()
     );
     expect(result.steps[0].tablets).toEqual({ '10': 1 });
+  });
+});
+
+describe('occupancy taper', () => {
+  const EC50 = 24.7;
+  const diazepam = (overrides: Partial<DrugConfig> = {}) => drug(FINE, { currentDose: 60, ec50: EC50, ...overrides });
+  const occupancy = (overrides: Partial<WeanConfig> = {}) =>
+    wean({ reductionType: 'occupancy', reductionValue: 5, rounding: 'nearest', ...overrides });
+
+  it('lowers the target occupancy by the same number of points each interval', () => {
+    const result = generateSchedule(diazepam(), occupancy());
+    const start = receptorOccupancy(60, EC50);
+    result.derivation.forEach(entry => {
+      expect(receptorOccupancy(entry.targetDose, EC50)).toBeCloseTo(start - entry.intervalIndex * 5, 2);
+    });
+  });
+
+  it('takes ever smaller dose steps as the dose falls', () => {
+    const doses = generateSchedule(diazepam(), occupancy()).derivation.map(entry => entry.targetDose);
+    const cuts = doses.slice(1).map((dose, i) => doses[i] - dose);
+    cuts.slice(1).forEach((cut, i) => expect(cut).toBeLessThan(cuts[i]));
+  });
+
+  it('stops once the occupancy target reaches zero', () => {
+    const result = generateSchedule(diazepam(), occupancy({ minimumDoseThreshold: 0 }));
+    expect(result.endReason).not.toBe('truncated');
+    expect(result.steps[result.steps.length - 1].isStop).toBe(true);
+    // 70.8% in 5-point steps reaches zero at the 15th interval.
+    expect(result.derivation.length).toBeLessThanOrEqual(15);
+  });
+
+  it('shows the occupancy arithmetic in the derivation', () => {
+    const entry = generateSchedule(diazepam(), occupancy()).derivation[1];
+    expect(entry.targetFormula).toBe('70.84 - 1 x 5 = 65.84% -> 47.6031mg');
+  });
+
+  it('flags a step whose occupancy drop is much larger than requested', () => {
+    // Only 10mg tablets that cannot be cut: 20mg to 10mg is a 16-point drop.
+    const coarse = drug([{ id: '1', strength: 10, canSplit: 'no' }], { currentDose: 20, ec50: EC50 });
+    const result = generateSchedule(coarse, occupancy({ reductionValue: 5 }));
+    expect(result.steps.some(step => step.steeperThanRequested)).toBe(true);
+    expect(result.warnings.some(w => w.includes('point occupancy drop'))).toBe(true);
+  });
+
+  it('does not flag drops within the requested points', () => {
+    const result = generateSchedule(diazepam(), occupancy());
+    expect(result.steps.filter(step => step.steeperThanRequested)).toEqual([]);
+  });
+
+  it('needs an EC50', () => {
+    const result = generateSchedule(diazepam({ ec50: undefined }), occupancy());
+    expect(result.steps).toEqual([]);
+    expect(result.warnings.some(w => w.includes('EC50'))).toBe(true);
   });
 });

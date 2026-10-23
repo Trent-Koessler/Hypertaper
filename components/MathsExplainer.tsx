@@ -107,6 +107,18 @@ const MathsExplainer: React.FC = () => {
           </p>
 
           <p className="text-sm text-slate-600 dark:text-slate-300 mb-3">
+            In <strong className="text-slate-800 dark:text-slate-100">occupancy</strong> mode the
+            curve is built from receptor occupancy instead, using the Michaelis–Menten model{' '}
+            <span className="font-mono text-teal-700 dark:text-teal-300">
+              occupancy = 100 × dose ÷ (dose + EC50)
+            </span>
+            , where EC50 is the dose that fills half the receptors. Occupancy falls by the same{' '}
+            <em>number of points</em> each time (e.g. 5 points), and each occupancy is turned back
+            into a dose. This is how the Maudsley tables are built: the first cuts are large in
+            milligrams and the last ones very small.
+          </p>
+
+          <p className="text-sm text-slate-600 dark:text-slate-300 mb-3">
             Each target is worked out from the original dose, never from the previous prescribed
             dose, so tablet rounding at one step never carries through the rest of the plan.
           </p>

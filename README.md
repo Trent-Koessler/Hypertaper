@@ -5,7 +5,14 @@ HyperTaper is a pure client-side web application designed to assist clinicians i
 **Live Application:** [https://trent-koessler.github.io/Hypertaper/](https://trent-koessler.github.io/Hypertaper/)
 
 ## Features
-- **Precise Tapering Algorithms**: Supports both fixed-dose and hyperbolic (percentage-based) reductions.
+- **Precise Tapering Algorithms**: Supports fixed-dose, hyperbolic (percentage-based) and
+  receptor-occupancy reductions.
+- **Receptor Occupancy (Michaelis–Menten)**: Enter the dose that gives 50% receptor occupancy
+  (EC50) and every dose in the plan, chart and calculations shows its estimated occupancy,
+  `100 × dose ÷ (dose + EC50)`. The "Occupancy" reduction method lowers occupancy by a fixed
+  number of percentage points each interval, which is how the Maudsley tables are built.
+  Diazepam starts at 24.7mg/day, which reproduces every occupancy figure in the Maudsley
+  diazepam tables; other drugs need a published value entered by hand.
 - **Start on the Clinic Date**: Choose whether the start date keeps the current dose for one
   interval (the default) or is the day the first reduction is taken, so the plan's dose changes
   line up with when the patient is seen without back-dating the start date. Tablets for the
@@ -45,7 +52,9 @@ HyperTaper is a pure client-side web application designed to assist clinicians i
 
 1. **Ideal curve.** Interval `n` falls on day `n × interval`, and asks for
    `target(n) = D₀ × (1 − r/100)ⁿ` for a percentage taper, or `D₀ − n × r` for a
-   fixed one. Every target is computed in closed form from the *original* dose,
+   fixed one. An occupancy taper aims for `occupancy(n) = RO₀ − n × r` percent,
+   where `RO₀ = 100 × D₀ / (D₀ + EC50)`, and turns it back into a dose with
+   `target(n) = EC50 × occupancy(n) / (100 − occupancy(n))`. Every target is computed in closed form from the *original* dose,
    not by chaining off the previously prescribed one, so tablet rounding at one
    step never compounds through the rest of the curve.
 2. **Achievable dose.** For each target, an unbounded-knapsack search over the
@@ -66,10 +75,11 @@ HyperTaper is a pure client-side web application designed to assist clinicians i
   the stated increment. The concentration of a compounded liquid should be
   confirmed with the dispensing pharmacy, and its shelf life may mean the total
   volume needs to be supplied in several batches.
-- **Dose, not receptor occupancy.** The percentage mode reduces the *dose* by a
-  fixed proportion. This is the practical approximation the Maudsley guidance
-  works with; it is not the same as reducing receptor occupancy linearly, which
-  would need drug-specific occupancy parameters.
+- **Occupancy is a model.** The percentage mode reduces the *dose* by a fixed
+  proportion. The occupancy mode reduces *estimated* receptor occupancy
+  linearly, using a simple Michaelis–Menten curve and the EC50 entered. That
+  value comes from imaging studies and varies between them, and only diazepam
+  has one built in.
 - **Splitting is assumed exact.** Real halves and quarters vary by roughly
   10–20% of the intended piece, which matters most at the smallest doses.
 - **At most twice daily.** Doses can be given once daily or morning and night;
