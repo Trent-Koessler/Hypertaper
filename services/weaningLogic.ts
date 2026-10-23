@@ -14,6 +14,7 @@ import {
   SplitPreference
 } from '../types';
 import { addDaysISO, formatDMY, isValidISODate, todayISO } from './dateUtils';
+import { doseForOccupancy, hasEC50, receptorOccupancy } from './occupancy';
 
 /** A physically takeable piece: a whole tablet, or a half/quarter of one. */
 interface Piece {
@@ -468,12 +469,20 @@ function validate(drug: DrugConfig, wean: WeanConfig, warnings: string[]): boole
     warnings.push(
       wean.reductionType === 'percentage'
         ? 'Enter a reduction percentage greater than zero.'
-        : 'Enter a reduction amount greater than zero.'
+        : wean.reductionType === 'occupancy'
+          ? 'Enter a reduction in receptor occupancy greater than zero percentage points.'
+          : 'Enter a reduction amount greater than zero.'
     );
     usable = false;
   }
   if (wean.reductionType === 'percentage' && wean.reductionValue > 100) {
     warnings.push('A reduction above 100% is not meaningful; use 100% to stop in a single step.');
+    usable = false;
+  }
+  if (wean.reductionType === 'occupancy' && !hasEC50(drug.ec50)) {
+    warnings.push(
+      `An occupancy taper needs the dose that gives 50% receptor occupancy (EC50, ${drug.unit}/day). Enter it under Receptor Occupancy, or choose another reduction method.`
+    );
     usable = false;
   }
   if (!Number.isFinite(wean.intervalDays) || wean.intervalDays < 1) {
@@ -490,16 +499,30 @@ function validate(drug: DrugConfig, wean: WeanConfig, warnings: string[]): boole
  * previous target, so the value never accumulates floating-point drift and
  * always equals the formula shown to the clinician.
  */
-function targetAtInterval(startingDose: number, wean: WeanConfig, n: number): number {
+function targetAtInterval(startingDose: number, wean: WeanConfig, n: number, ec50 = 0): number {
+  if (wean.reductionType === 'occupancy') {
+    // Occupancy falls in a straight line; the dose that gives it does not.
+    return doseForOccupancy(targetOccupancy(startingDose, wean, n, ec50), ec50);
+  }
   return wean.reductionType === 'fixed'
     ? startingDose - n * wean.reductionValue
     : startingDose * Math.pow(1 - wean.reductionValue / 100, n);
 }
 
-function targetFormula(startingDose: number, wean: WeanConfig, n: number, target: number, unit: string): string {
+/** The occupancy an occupancy taper aims for at interval `n`, in percent. */
+function targetOccupancy(startingDose: number, wean: WeanConfig, n: number, ec50: number): number {
+  return receptorOccupancy(startingDose, ec50) - n * wean.reductionValue;
+}
+
+function targetFormula(startingDose: number, wean: WeanConfig, n: number, target: number, unit: string, ec50 = 0): string {
   if (n === 0) return `${num(startingDose)}${unit} (starting dose)`;
   if (wean.reductionType === 'fixed') {
     return `${num(startingDose)} - (${n} x ${num(wean.reductionValue)}) = ${num(target)}${unit}`;
+  }
+  if (wean.reductionType === 'occupancy') {
+    const start = num(receptorOccupancy(startingDose, ec50), 2);
+    const occupancy = targetOccupancy(startingDose, wean, n, ec50);
+    return `${start} - ${n} x ${num(wean.reductionValue)} = ${num(Math.max(0, occupancy), 2)}% -> ${num(target)}${unit}`;
   }
   const factor = num(1 - wean.reductionValue / 100, 6);
   return `${num(startingDose)} x ${factor}^${n} = ${num(target)}${unit}`;
@@ -518,6 +541,8 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
 
   const startingDose = drug.currentDose;
   const unit = drug.unit;
+  const ec50 = hasEC50(drug.ec50) ? drug.ec50 : 0;
+  const occupancyTaper = wean.reductionType === 'occupancy';
   const splitDaily = drug.dosesPerDay === 2;
   const rounding = wean.rounding ?? 'below';
   const options: CombinationOptions = { rounding, splitPreference: drug.splitPreference };
@@ -535,7 +560,7 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
   let onLiquid = false;
 
   while (iteration < MAX_ITERATIONS) {
-    const target = targetAtInterval(startingDose, wean, iteration);
+    const target = targetAtInterval(startingDose, wean, iteration, ec50);
     if (target <= EPSILON || target < threshold - EPSILON) break;
 
     const previousHold = holds[holds.length - 1];
@@ -625,7 +650,7 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
       intervalIndex: index,
       date,
       targetDose: hold.target,
-      targetFormula: targetFormula(startingDose, wean, index, hold.target, unit),
+      targetFormula: targetFormula(startingDose, wean, index, hold.target, unit, ec50),
       actualDose,
       actualFormula: describePieces(pieces, actualDose, unit, liquidMl, drug.liquid),
       ...(split ? { splitFormula: describeSplit(split, unit, drug.liquid) } : {}),
@@ -705,7 +730,7 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
   }
 
   // Carry the ideal curve to the end date so it spans the same range as the plan.
-  const finalTarget = targetAtInterval(startingDose, wean, holds.length);
+  const finalTarget = targetAtInterval(startingDose, wean, holds.length, ec50);
   targetCurve.push({ date: endDate, dose: roundDose(Math.max(0, finalTarget)) });
   // The chart starts on the start date; points before it belong to doses already taken.
   if (offsetDays > 0) {
@@ -726,7 +751,9 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
   }
   const firstReduction = wean.reductionType === 'percentage'
     ? startingDose * (wean.reductionValue / 100)
-    : wean.reductionValue;
+    : occupancyTaper
+      ? startingDose - targetAtInterval(startingDose, wean, 1, ec50)
+      : wean.reductionValue;
   if (smallestPiece > firstReduction) {
     warnings.push(
       `The smallest ${startsOnLiquid ? 'measurable liquid dose' : 'available piece'} is ${num(smallestPiece)}${unit}, which is larger than the requested reduction of ${num(firstReduction)}${unit}. The taper cannot follow the requested curve — ${startsOnLiquid ? 'measure a smaller volume or use a more dilute liquid' : 'add a smaller strength, allow splitting, or use a liquid formulation'}.`
@@ -737,24 +764,34 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
   // a coarse formulary turns a gentle taper into a cliff. That is the
   // clinically dangerous failure mode, and it is invisible from the requested
   // percentage alone, so each such step is flagged and the worst one reported.
+  // An occupancy taper asks for a drop in occupancy, not in dose, so that is
+  // what its steps are measured by.
+  const previousDoseOf = (step: ScheduleStep) => step.actualDose + (step.reductionFromPrevious ?? 0);
+  const dropSize = (step: ScheduleStep): number =>
+    occupancyTaper
+      ? receptorOccupancy(previousDoseOf(step), ec50) - receptorOccupancy(step.actualDose, ec50)
+      : step.reductionPercent!;
   steps.forEach(step => {
     if (step.isStop || step.reductionPercent === null) return;
-    const requested = wean.reductionType === 'percentage'
-      ? wean.reductionValue
-      : (wean.reductionValue / (step.actualDose + (step.reductionFromPrevious ?? 0))) * 100;
-    step.steeperThanRequested = step.reductionPercent > requested * DROP_WARNING_RATIO;
+    const requested = wean.reductionType === 'fixed'
+      ? (wean.reductionValue / previousDoseOf(step)) * 100
+      : wean.reductionValue;
+    step.steeperThanRequested = dropSize(step) > requested * DROP_WARNING_RATIO + EPSILON;
   });
   const worstDrop = steps
     .filter(step => step.steeperThanRequested)
     .reduce<ScheduleStep | null>(
-      (worst, step) => (!worst || step.reductionPercent! > worst.reductionPercent! ? step : worst),
+      (worst, step) => (!worst || dropSize(step) > dropSize(worst) ? step : worst),
       null
     );
 
   if (worstDrop) {
-    const from = roundDose(worstDrop.actualDose + (worstDrop.reductionFromPrevious ?? 0));
+    const from = roundDose(previousDoseOf(worstDrop));
+    const size = occupancyTaper
+      ? `${num(dropSize(worstDrop), 1)}-point occupancy`
+      : `${num(worstDrop.reductionPercent!, 1)}%`;
     warnings.push(
-      `The available ${worstDrop.liquidMl !== undefined ? 'liquid measure forces' : 'strengths force'} a ${num(worstDrop.reductionPercent!, 1)}% drop on ${formatDMY(worstDrop.date)} (${num(from)}${unit} to ${num(worstDrop.actualDose)}${unit}), which is steeper than the requested reduction. ${worstDrop.liquidMl !== undefined ? 'Measure a smaller volume, use a more dilute liquid,' : 'Add a smaller strength, allow splitting,'} or lengthen the interval so the patient holds each dose for longer.`
+      `The available ${worstDrop.liquidMl !== undefined ? 'liquid measure forces' : 'strengths force'} a ${size} drop on ${formatDMY(worstDrop.date)} (${num(from)}${unit} to ${num(worstDrop.actualDose)}${unit}), which is steeper than the requested reduction. ${worstDrop.liquidMl !== undefined ? 'Measure a smaller volume, use a more dilute liquid,' : 'Add a smaller strength, allow splitting,'} or lengthen the interval so the patient holds each dose for longer.`
     );
   }
 
