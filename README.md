@@ -8,7 +8,8 @@ HyperTaper is a pure client-side web application designed to assist clinicians i
 - **Precise Tapering Algorithms**: Supports fixed-dose, hyperbolic (percentage-based) and
   receptor-occupancy reductions.
 - **Receptor Occupancy (Michaelis–Menten)**: Enter the dose that gives 50% receptor occupancy
-  (EC50) and every dose in the plan, chart and calculations shows its estimated occupancy,
+  (EC50) and the chart and calculations show each dose's estimated occupancy (the Schedule tab and
+  EMR text show it when "Show receptor occupancy" is ticked),
   `100 × dose ÷ (dose + EC50)`. The "Occupancy" reduction method lowers occupancy by a fixed
   number of percentage points each interval, which is how the Maudsley tables are built.
   Diazepam starts at 24.7mg/day, which reproduces every occupancy figure in the Maudsley
@@ -45,7 +46,10 @@ HyperTaper is a pure client-side web application designed to assist clinicians i
   dates, morning and night amounts (e.g. "1½ × 2mg tablets", "0.6mL of liquid"), the total
   each day and a tick box. Name and contact details are blank lines to fill in by hand, so no
   patient information is entered into the app. "Print handout" prints the handout alone.
-- **EMR Integration**: One-click copy of a fixed-width plain-text plan for pasting directly into clinical notes.
+- **EMR Integration**: One-click copy of the plan for pasting into clinical notes. Each step is a
+  short block of lines (dates, daily dose, morning and night, step total) rather than a padded
+  table, so it stays readable in any font. Rich-text notes receive the lines as soft line breaks
+  within one paragraph per step; plain-text fields receive ordinary line breaks.
 - **Secure & Private**: 100% client-side logic. No patient data is sent to external servers!!!
 
 ## How the maths works

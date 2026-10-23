@@ -3,7 +3,7 @@ import { Pill, Calculator, Calendar, Info, AlertCircle, AlertTriangle, Plus, Tra
 import { DrugConfig, WeanConfig, Denomination, ScheduleStep, LiquidConfig, DoseBreakdown, DoseRounding } from './types';
 import { generateSchedule } from './services/weaningLogic';
 import { KNOWN_EC50_MG, hasEC50, receptorOccupancy } from './services/occupancy';
-import { formatISODate, todayISO } from './services/dateUtils';
+import { addDaysISO, formatDMY, formatISODate, todayISO } from './services/dateUtils';
 import WeanChart from './components/WeanChart';
 import TabletVisualizer from './components/TabletVisualizer';
 import CalculationBreakdown from './components/CalculationBreakdown';
@@ -123,6 +123,9 @@ const knownEC50 = (name: string, unit: string): number => {
   return unit === 'mcg' ? mg * 1000 : mg;
 };
 
+const escapeHtml = (text: string): string =>
+  text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
 const describeDuration = (days: number): string => {
   if (days % 7 === 0 && days >= 7) {
     const weeks = days / 7;
@@ -172,6 +175,8 @@ const App: React.FC = () => {
   const [isCustomDrug, setIsCustomDrug] = useState(false);
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const [activeTab, setActiveTab] = useState<ResultTab>('chart');
+  /** Whether the Schedule tab and EMR text include each dose's receptor occupancy. */
+  const [showOccupancy, setShowOccupancy] = useState(false);
 
   /** Inactive panels are hidden on screen only, so printing still includes them. */
   const panelClass = (tab: ResultTab): string =>
@@ -258,9 +263,8 @@ const App: React.FC = () => {
   const twiceDaily = drug.dosesPerDay === 2;
   const rounding = wean.rounding ?? 'below';
   const ec50 = hasEC50(drug.ec50) ? drug.ec50 : null;
-  /** Receptor occupancy at a dose, as shown in the plan, or null when no EC50 is set. */
-  const occupancyAt = (dose: number): number | null => (ec50 === null ? null : receptorOccupancy(dose, ec50));
   const occupancyTaper = wean.reductionType === 'occupancy';
+  const occupancyShown = showOccupancy && ec50 !== null;
   const reductionText = occupancyTaper
     ? `${wean.reductionValue} occupancy points`
     : wean.reductionType === 'percentage' ? `${wean.reductionValue}%` : `${wean.reductionValue}${drug.unit}`;
@@ -281,97 +285,108 @@ const App: React.FC = () => {
     window.print();
   };
 
-  const emrText = useMemo(() => {
-    if (!hasSchedule) return '';
+  // The EMR copy is a list of short blocks, one per step, rather than a table:
+  // padded columns fall apart when pasted into a note in a proportional font.
+  // Each block's lines are joined with soft line breaks (<br>) in the HTML copy
+  // and newlines in the plain-text copy, with a blank line between blocks.
+  const emrBlocks = useMemo((): string[][] => {
+    if (!hasSchedule) return [];
+    const blocks: string[][] = [];
 
-    const dateColWidth = 18;
-    const doseColWidth = 12;
-    const occupancyColWidth = ec50 !== null ? 11 : 0;
-    const durationColWidth = 12;
-    const occupancyCol = (dose: number): string =>
-      ec50 !== null ? `${formatDose(receptorOccupancy(dose, ec50), 1)}%`.padEnd(occupancyColWidth) : '';
-
-    let text = `Medication Taper Plan\n`;
-    text += `Drug: ${drug.name || '(unnamed)'}\n`;
-    text += `Start Dose: ${drug.currentDose}${drug.unit}\n`;
-    text += `Reduction: ${reductionText} every ${wean.intervalDays} days\n`;
-    if (ec50 !== null) {
-      text += `Receptor occupancy: estimated as 100 x dose / (dose + ${ec50}${drug.unit}), the dose for 50% occupancy (EC50)\n`;
+    const header = [
+      'Medication Taper Plan',
+      `Drug: ${drug.name || '(unnamed)'}`,
+      `Start dose: ${drug.currentDose}${drug.unit}`,
+      `Reduction: ${reductionText} every ${wean.intervalDays} days`,
+      `Stop dose: ${wean.minimumDoseThreshold}${drug.unit}`,
+      `Dosing: ${twiceDaily ? `twice daily (morning and night, ${drug.splitPreference === 'fewest' ? 'fewest pieces' : 'even doses'})` : 'once daily'}`
+    ];
+    if (occupancyShown) {
+      header.push(`Receptor occupancy: estimated as 100 x dose / (dose + ${ec50}${drug.unit}), the dose for 50% occupancy (EC50)`);
     }
-    text += `Stop Dose: ${wean.minimumDoseThreshold}${drug.unit}\n`;
-    text += `Dosing: ${twiceDaily ? `twice daily (morning and night, ${drug.splitPreference === 'fewest' ? 'fewest pieces' : 'even doses'})` : 'once daily'}\n`;
-    if (rounding !== 'below') text += `When tablets can't match the target: ${ROUNDING_TEXT[rounding].label.toLowerCase()} (${ROUNDING_TEXT[rounding].summary})\n`;
-    if (wean.reduceOnStartDate) text += `First reduction: on the start date (${drug.startDate})\n`;
+    if (rounding !== 'below') header.push(`When tablets can't match the target: ${ROUNDING_TEXT[rounding].label.toLowerCase()} (${ROUNDING_TEXT[rounding].summary})`);
+    if (wean.reduceOnStartDate) header.push(`First reduction: on the start date (${formatDMY(drug.startDate)})`);
     if (liquidOn) {
-      text += `Liquid: ${liquid!.concentration}${drug.unit}/mL, measured to ${liquid!.measureIncrementMl}mL, `
+      header.push(`Liquid: ${liquid!.concentration}${drug.unit}/mL, measured to ${liquid!.measureIncrementMl}mL, `
         + (liquidOnly
-          ? `for the whole taper\n`
+          ? 'for the whole taper'
           : liquid!.mode === 'tolerance'
-            ? `once a tablet step would drop by more than ${liquid!.maxTabletDropPercent}%\n`
-            : `for doses below ${liquid!.switchBelowDose}${drug.unit}\n`);
+            ? `once a tablet step would drop by more than ${liquid!.maxTabletDropPercent}%`
+            : `for doses below ${liquid!.switchBelowDose}${drug.unit}`));
     }
-    text += `\n`;
+    blocks.push(header);
 
-    text += `Date`.padEnd(dateColWidth) + `Dose`.padEnd(doseColWidth) + (ec50 !== null ? `Occupancy`.padEnd(occupancyColWidth) : '')
-      + `For`.padEnd(durationColWidth) + `Instructions\n`;
-    text += `-`.repeat(80) + `\n`;
-
-    schedule.steps.forEach(step => {
-      // A fixed format keeps the note identical on every machine, unlike a locale-dependent one.
-      const dateStr = formatISODate(step.date, { year: 'numeric', month: 'short', day: '2-digit' });
-
+    schedule.steps.forEach((step, index) => {
+      // dd-mm-yyyy reads the same on every machine, unlike a locale-dependent date.
+      const from = formatDMY(step.date);
       if (step.isStop) {
-        text += dateStr.padEnd(dateColWidth) + `STOP`.padEnd(doseColWidth) + occupancyCol(0) + `-`.padEnd(durationColWidth) + `Cease medication\n`;
+        blocks.push([`Step ${index + 1}: from ${from}`, 'STOP - cease medication']);
         return;
       }
 
-      const stepTotal = describeTablets(step, drug.denominations, drug.unit, step.durationDays, liquid, true);
-      const timing = step.split
-        ? `Morning ${formatDose(step.split.am.dose, 3)}${drug.unit} (${describeTablets(step.split.am, drug.denominations, drug.unit, 1, liquid)}), `
-          + `Night ${formatDose(step.split.pm.dose, 3)}${drug.unit} (${describeTablets(step.split.pm, drug.denominations, drug.unit, 1, liquid)})`
-        : `${describeTablets(step, drug.denominations, drug.unit, 1, liquid)} daily`;
-      const instruction = `${timing} (step total: ${stepTotal})`;
-
-      text += dateStr.padEnd(dateColWidth)
-        + `${formatDose(step.actualDose, 3)}${drug.unit}`.padEnd(doseColWidth)
-        + occupancyCol(step.actualDose)
-        + describeDuration(step.durationDays).padEnd(durationColWidth)
-        + `${instruction}\n`;
+      const to = formatDMY(addDaysISO(step.date, step.durationDays - 1));
+      const occupancy = occupancyShown ? ` (occupancy ${formatDose(receptorOccupancy(step.actualDose, ec50!), 1)}%)` : '';
+      const lines = [
+        `Step ${index + 1}: ${from} to ${to} (${describeDuration(step.durationDays)})`,
+        `${formatDose(step.actualDose, 3)}${drug.unit} daily${occupancy}`
+      ];
+      if (step.split) {
+        lines.push(`Morning: ${formatDose(step.split.am.dose, 3)}${drug.unit} = ${describeTablets(step.split.am, drug.denominations, drug.unit, 1, liquid)}`);
+        lines.push(`Night: ${formatDose(step.split.pm.dose, 3)}${drug.unit} = ${describeTablets(step.split.pm, drug.denominations, drug.unit, 1, liquid)}`);
+      } else {
+        lines.push(`Take: ${describeTablets(step, drug.denominations, drug.unit, 1, liquid)} once daily`);
+      }
+      lines.push(`Step total: ${describeTablets(step, drug.denominations, drug.unit, step.durationDays, liquid, true)}`);
+      blocks.push(lines);
     });
 
     if (schedule.endReason === 'truncated') {
-      text += `\n*** INCOMPLETE PLAN — the taper had not reached the stop dose when the schedule was cut off. ***\n`;
+      blocks.push(['*** INCOMPLETE PLAN - the taper had not reached the stop dose when the schedule was cut off. ***']);
     }
 
-    text += `\n` + `-`.repeat(80) + `\n`;
-    text += `Total Medication Required for Full Plan:\n`;
+    const totals = ['Total medication required for full plan:'];
     Object.entries(schedule.totalTablets).forEach(([id, count]: [string, number]) => {
       const denom = drug.denominations.find(d => d.id === id);
       if (denom) {
-        text += `- ${formatCount(count)}x ${denom.strength}${drug.unit} tablets taken`
-          + (supplyCount(count) !== count ? ` (supply ${supplyCount(count)} whole tablets)` : '') + `\n`;
+        totals.push(`- ${formatCount(count)}x ${denom.strength}${drug.unit} tablets taken`
+          + (supplyCount(count) !== count ? ` (supply ${supplyCount(count)} whole tablets)` : ''));
       }
     });
     if (schedule.totalLiquidMl > 0 && liquid) {
       const bottles = bottleCount(schedule.totalLiquidMl, liquid);
-      text += `- ${formatDose(schedule.totalLiquidMl, 2)}mL of ${liquid.concentration}${drug.unit}/mL liquid`
-        + (bottles !== null ? ` (supply ${bottles} x ${liquid.bottleSizeMl}mL bottle${bottles === 1 ? '' : 's'})` : '') + `\n`;
+      totals.push(`- ${formatDose(schedule.totalLiquidMl, 2)}mL of ${liquid.concentration}${drug.unit}/mL liquid`
+        + (bottles !== null ? ` (supply ${bottles} x ${liquid.bottleSizeMl}mL bottle${bottles === 1 ? '' : 's'})` : ''));
     }
+    blocks.push(totals);
 
     if (schedule.warnings.length > 0) {
-      text += `\nNotes:\n`;
-      schedule.warnings.forEach(warning => {
-        text += `- ${warning}\n`;
-      });
+      blocks.push(['Notes:', ...schedule.warnings.map(warning => `- ${warning}`)]);
     }
 
-    return text;
-  }, [schedule, drug, wean, hasSchedule, liquid, liquidOn, liquidOnly, twiceDaily, rounding, ec50, reductionText]);
+    return blocks;
+  }, [schedule, drug, wean, hasSchedule, liquid, liquidOn, liquidOnly, twiceDaily, rounding, ec50, occupancyShown, reductionText]);
+
+  const emrText = useMemo(() => emrBlocks.map(lines => lines.join('\n')).join('\n\n'), [emrBlocks]);
+  const emrHtml = useMemo(
+    () => emrBlocks.map(lines => `<p>${lines.map(escapeHtml).join('<br>')}</p>`).join(''),
+    [emrBlocks]
+  );
 
   const copyEmrText = async () => {
     try {
       if (!navigator.clipboard) throw new Error('Clipboard unavailable');
-      await navigator.clipboard.writeText(emrText);
+      // Rich-text editors take the HTML copy, where each step's lines are soft
+      // line breaks inside one paragraph; plain-text fields take the text copy.
+      if (typeof ClipboardItem !== 'undefined' && navigator.clipboard.write) {
+        await navigator.clipboard.write([
+          new ClipboardItem({
+            'text/plain': new Blob([emrText], { type: 'text/plain' }),
+            'text/html': new Blob([emrHtml], { type: 'text/html' })
+          })
+        ]);
+      } else {
+        await navigator.clipboard.writeText(emrText);
+      }
       setCopyState('copied');
     } catch {
       // Fails on insecure origins and when the user denies permission.
@@ -993,6 +1008,17 @@ const App: React.FC = () => {
                        <Calendar className="w-4 h-4" />
                        Deprescribing Schedule for {drug.name || 'this medication'}
                      </h3>
+                     {ec50 !== null && (
+                       <label className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300 cursor-pointer print:hidden">
+                         <input
+                           type="checkbox"
+                           checked={showOccupancy}
+                           onChange={e => setShowOccupancy(e.target.checked)}
+                           className="w-4 h-4 accent-teal-600"
+                         />
+                         Show receptor occupancy
+                       </label>
+                     )}
                   </div>
 
                   <div className="overflow-x-auto">
@@ -1033,9 +1059,9 @@ const App: React.FC = () => {
                                      Target: {formatDose(step.targetDose)}{drug.unit}
                                    </span>
                                  )}
-                                 {occupancyAt(step.actualDose) !== null && (
+                                 {occupancyShown && (
                                    <span className="text-xs text-violet-600 dark:text-violet-300">
-                                     Occupancy: {formatDose(occupancyAt(step.actualDose)!, 1)}%
+                                     Occupancy: {formatDose(receptorOccupancy(step.actualDose, ec50!), 1)}%
                                    </span>
                                  )}
                                  {!step.isStop && step.actualDose < step.targetDose * 0.9 && (
@@ -1051,7 +1077,7 @@ const App: React.FC = () => {
                                  {!step.isStop && step.reductionPercent !== null && (
                                    <span className={`text-[10px] mt-1 ${step.steeperThanRequested ? 'text-amber-500 font-semibold' : 'text-slate-400 dark:text-slate-500'}`}>
                                      ↓ {formatDose(step.reductionFromPrevious ?? 0, 3)}{drug.unit} ({formatDose(step.reductionPercent, 1)}%
-                                     {ec50 !== null && `, ${formatDose(receptorOccupancy(step.actualDose + (step.reductionFromPrevious ?? 0), ec50) - receptorOccupancy(step.actualDose, ec50), 1)} occupancy pts`}) from previous dose
+                                     {occupancyShown && `, ${formatDose(receptorOccupancy(step.actualDose + (step.reductionFromPrevious ?? 0), ec50) - receptorOccupancy(step.actualDose, ec50), 1)} occupancy pts`}) from previous dose
                                    </span>
                                  )}
                               </div>
@@ -1167,7 +1193,7 @@ const App: React.FC = () => {
                     id="emr-text"
                     readOnly
                     value={emrText}
-                    className="w-full h-40 p-3 text-sm font-mono border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-300 rounded-lg outline-none resize-y"
+                    className="w-full h-72 p-3 text-sm font-mono border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-300 rounded-lg outline-none resize-y"
                   />
                 </div>
               </div>
