@@ -7,13 +7,16 @@ HyperTaper is a pure client-side web application designed to assist clinicians i
 ## Features
 - **Precise Tapering Algorithms**: Supports fixed-dose, hyperbolic (percentage-based) and
   receptor-occupancy reductions.
-- **Receptor Occupancy (Michaelis–Menten)**: Enter the dose that gives 50% receptor occupancy
-  (EC50) and the chart and calculations show each dose's estimated occupancy (the Schedule tab and
-  EMR text show it when "Show receptor occupancy" is ticked),
-  `100 × dose ÷ (dose + EC50)`. The "Occupancy" reduction method lowers occupancy by a fixed
-  number of percentage points each interval, which is how the Maudsley tables are built.
-  Diazepam starts at 24.7mg/day, which reproduces every occupancy figure in the Maudsley
-  diazepam tables; other drugs need a published value entered by hand.
+- **Receptor Occupancy (Michaelis–Menten) & 53-Drug Referenced PET Bank**: Includes a built-in,
+  literature-referenced $\text{EC}_{50}$ / $\text{ED}_{50}$ bank across **53 psychotropic medications**
+  (Antidepressants, Antipsychotics, Benzodiazepines & Z-Drugs, Gabapentinoids, and ADHD/autonomic
+  agents) grounded in human *in vivo* PET/SPECT neuroimaging meta-analyses (Sørensen et al., *Mol
+  Psychiatry* 2022; Meyer et al., *Am J Psychiatry* 2004; Lako et al., *J Clin Psychopharmacol*
+  2013; Horowitz et al., *Schizophr Bull* 2021) and *The Maudsley Deprescribing Guidelines*
+  (Horowitz & Taylor, 2024). Selecting a medication automatically populates its published
+  $\text{EC}_{50}$, Australian PBS tablet strengths, oral liquid concentration, and Maudsley stop
+  threshold, and links directly to the [18-Receptor Psychopharmacology Visualiser](https://trent-koessler.github.io/Psychopharmacology_visualiser/)
+  for multi-receptor occupancy and CYP/organ modifier adjustments (`?drug=...&dose=...&ec50=...&mode=occupancy`).
 - **Start on the Clinic Date**: Choose whether the start date keeps the current dose for one
   interval (the default) or is the day the first reduction is taken, so the plan's dose changes
   line up with when the patient is seen without back-dating the start date. Tablets for the
@@ -79,11 +82,13 @@ HyperTaper is a pure client-side web application designed to assist clinicians i
   the stated increment. The concentration of a compounded liquid should be
   confirmed with the dispensing pharmacy, and its shelf life may mean the total
   volume needs to be supplied in several batches.
-- **Occupancy is a model.** The percentage mode reduces the *dose* by a fixed
+- **Occupancy is a population PET model.** The percentage mode reduces the *dose* by a fixed
   proportion. The occupancy mode reduces *estimated* receptor occupancy
-  linearly, using a simple Michaelis–Menten curve and the EC50 entered. That
-  value comes from imaging studies and varies between them, and only diazepam
-  has one built in.
+  linearly, using a simple Michaelis–Menten curve and the published population $\text{EC}_{50}$
+  from human PET/SPECT neuroimaging studies (or a patient-adjusted $\text{EC}_{50}$ passed from
+  the Psychopharmacology Visualiser). Individual pharmacokinetics (e.g., CYP2D6/2C19/1A2
+  metaboliser status, smoking, renal/hepatic function) shift a patient's true $\text{EC}_{50}$
+  around the population mean.
 - **Splitting is assumed exact.** Real halves and quarters vary by roughly
   10–20% of the intended piece, which matters most at the smallest doses.
 - **At most twice daily.** Doses can be given once daily or morning and night;
