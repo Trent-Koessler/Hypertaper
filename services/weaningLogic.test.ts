@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { generateSchedule, findBestTabletCombination, findLiquidDose } from './weaningLogic';
 import { DrugConfig, WeanConfig, Denomination, LiquidConfig } from '../types';
-import { receptorOccupancy, KNOWN_EC50_MG, DRUG_REFERENCE_BANK, getDrugReference, buildVisualiserUrl } from './occupancy';
+import { receptorOccupancy, doseForOccupancy, KNOWN_EC50_MG, DRUG_REFERENCE_BANK, BANK_SOURCES, getDrugReference, buildVisualiserUrl } from './occupancy';
 
 const drug = (denominations: Denomination[], overrides: Partial<DrugConfig> = {}): DrugConfig => ({
   name: 'Test',
@@ -850,6 +850,17 @@ describe('occupancy taper', () => {
     });
   });
 
+  it('uses the maximum occupancy when one is set', () => {
+    // Quetiapine at D2 never passes 49.1% (Lako et al. 2013).
+    const quetiapine = drug(FINE, { currentDose: 300, ec50: 370, emax: 49.1 });
+    const result = generateSchedule(quetiapine, occupancy({ reductionValue: 2 }));
+    const start = receptorOccupancy(300, 370, 49.1);
+    expect(start).toBeCloseTo(22.0, 1);
+    result.derivation.forEach(entry => {
+      expect(receptorOccupancy(entry.targetDose, 370, 49.1)).toBeCloseTo(start - entry.intervalIndex * 2, 2);
+    });
+  });
+
   it('takes ever smaller dose steps as the dose falls', () => {
     const doses = generateSchedule(diazepam(), occupancy()).derivation.map(entry => entry.targetDose);
     const cuts = doses.slice(1).map((dose, i) => doses[i] - dose);
@@ -890,36 +901,55 @@ describe('occupancy taper', () => {
 });
 
 describe('DRUG_REFERENCE_BANK and Visualiser linkage', () => {
-  it('provides referenced PET / Maudsley ED50 values across all psychotropic classes', () => {
-    expect(Object.keys(DRUG_REFERENCE_BANK).length).toBeGreaterThanOrEqual(40);
+  it('holds the published values', () => {
     expect(KNOWN_EC50_MG.Diazepam).toBe(24.7);
-    expect(KNOWN_EC50_MG.Escitalopram).toBe(3.7);
-    expect(KNOWN_EC50_MG.Citalopram).toBe(6.0);
+    expect(KNOWN_EC50_MG.Citalopram).toBe(3.4);
     expect(KNOWN_EC50_MG.Sertraline).toBe(9.1);
-    expect(KNOWN_EC50_MG.Venlafaxine).toBe(17.5);
-    expect(KNOWN_EC50_MG.Risperidone).toBe(1.2);
-    expect(KNOWN_EC50_MG.Olanzapine).toBe(4.5);
-    expect(KNOWN_EC50_MG.Haloperidol).toBe(0.55);
+    expect(KNOWN_EC50_MG.Venlafaxine).toBe(5.8);
+    expect(DRUG_REFERENCE_BANK.Quetiapine.emax_pct).toBe(49.1);
+    // No usable data, so no value is offered.
+    expect(KNOWN_EC50_MG.Mirtazapine).toBeUndefined();
   });
 
-  it('includes valid citations, PBS denominations, and clinical notes for every entry', () => {
+  it('gives every value a source and says how it was obtained', () => {
     for (const [name, entry] of Object.entries(DRUG_REFERENCE_BANK)) {
       expect(entry.name).toBe(name);
-      expect(entry.ec50_mg).toBeGreaterThan(0);
-      expect(entry.citation.length).toBeGreaterThan(10);
-      expect(entry.pbsDenominations.length).toBeGreaterThan(0);
-      expect(entry.defaultDose_mg).toBeGreaterThan(0);
-      expect(entry.minStopDose_mg).toBeGreaterThan(0);
-      expect(entry.clinicalNote.length).toBeGreaterThan(15);
+      expect(entry.method.length).toBeGreaterThan(10);
+      expect(entry.ed50_mg === null).toBe(entry.evidence === 'none');
+      if (entry.ed50_mg !== null) expect(BANK_SOURCES[entry.source!]).toBeDefined();
+      if (entry.emax_pct !== null) expect(entry.emax_pct).toBeLessThanOrEqual(100);
     }
   });
 
-  it('resolves drugs case-insensitively by name or id and builds Visualiser deep-links', () => {
-    const esc = getDrugReference('escitalopram');
-    expect(esc?.name).toBe('Escitalopram');
-    expect(esc?.ec50_mg).toBe(3.7);
+  it('reproduces the haloperidol occupancy table in Horowitz et al. 2021', () => {
+    const { ed50_mg, emax_pct } = DRUG_REFERENCE_BANK.Haloperidol;
+    const table: [number, number][] = [[10, 86.3], [4, 79.0], [2, 69.4], [1, 55.7], [0.5, 40.0], [0.25, 25.5]];
+    for (const [dose, occupancy] of table) {
+      expect(receptorOccupancy(dose, ed50_mg!, emax_pct!)).toBeCloseTo(occupancy, 0);
+    }
+  });
 
-    const url = buildVisualiserUrl('Escitalopram', 10);
-    expect(url).toBe('https://trent-koessler.github.io/Psychopharmacology_visualiser/?drug=escitalopram&dose=10');
+  it('reproduces the olanzapine taper in Horowitz et al. 2021', () => {
+    const { ed50_mg, emax_pct } = DRUG_REFERENCE_BANK.Olanzapine;
+    const published = [7.5, 5.9, 4.6, 3.6, 2.7, 2.0, 1.4, 0.9, 0.4];
+    const start = receptorOccupancy(7.5, ed50_mg!, emax_pct!);
+    published.forEach((dose, step) => {
+      const target = doseForOccupancy(start * (1 - step / 9), ed50_mg!, emax_pct!);
+      expect(Math.abs(target - dose) / dose).toBeLessThan(0.05);
+    });
+  });
+
+  it('never asks for more occupancy than the maximum', () => {
+    expect(doseForOccupancy(49.1, 370, 49.1)).toBe(Infinity);
+    expect(receptorOccupancy(10000, 370, 49.1)).toBeLessThan(49.1);
+    expect(doseForOccupancy(receptorOccupancy(300, 370, 49.1), 370, 49.1)).toBeCloseTo(300, 6);
+  });
+
+  it('resolves drugs by name or id and links only to drugs the Visualiser has', () => {
+    expect(getDrugReference('escitalopram')?.name).toBe('Escitalopram');
+    expect(buildVisualiserUrl('Escitalopram', 10)).toBe(
+      'https://trent-koessler.github.io/Psychopharmacology_visualiser/?drug=escitalopram&dose=10'
+    );
+    expect(buildVisualiserUrl('Diazepam', 10)).toBeNull();
   });
 });

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Pill, Calculator, Calendar, Info, AlertCircle, AlertTriangle, Plus, Trash2, Printer, Scissors, Sun, Moon, Copy, Check, Droplet } from 'lucide-react';
 import { DrugConfig, WeanConfig, Denomination, ScheduleStep, LiquidConfig, DoseBreakdown, DoseRounding } from './types';
 import { generateSchedule } from './services/weaningLogic';
-import { KNOWN_EC50_MG, DRUG_REFERENCE_BANK, DrugCategory, getDrugReference, buildVisualiserUrl, hasEC50, receptorOccupancy } from './services/occupancy';
+import { KNOWN_EC50_MG, DRUG_REFERENCE_BANK, DRUG_CLASSES, BANK_SOURCES, DrugReferenceEntry, getDrugReference, buildVisualiserUrl, hasEC50, effectiveEmax, receptorOccupancy } from './services/occupancy';
 import { addDaysISO, formatDMY, formatISODate, todayISO } from './services/dateUtils';
 import WeanChart from './components/WeanChart';
 import TabletVisualizer from './components/TabletVisualizer';
@@ -20,20 +20,19 @@ import {
   maudsleyCurve
 } from './services/maudsleyDiazepam';
 
-const DRUG_CATEGORIES: DrugCategory[] = [
-  'Benzodiazepines & Z-Drugs',
-  'Antidepressants (SSRIs, SNRIs & Atypicals)',
-  'Antidepressants (TCAs & MAOIs)',
-  'Antipsychotics (Second & Third Generation)',
-  'Antipsychotics (First Generation)',
-  'Gabapentinoids',
-  'ADHD, Sedative & Rescue Agents'
-];
-
 const COMMON_DRUGS = [
   ...Object.keys(DRUG_REFERENCE_BANK),
   "Other"
 ];
+
+/** Plain-language labels for how a drug's EC50 was obtained. */
+const EVIDENCE_LABELS: Record<DrugReferenceEntry['evidence'], string> = {
+  reported: 'Published value',
+  'back-calculated': 'Back-calculated from published tables',
+  fitted: 'Fitted to published data',
+  derived: 'Derived estimate',
+  none: 'No occupancy data'
+};
 
 type ResultTab = 'chart' | 'schedule' | 'handout' | 'maudsley';
 
@@ -116,13 +115,29 @@ const describeTablets = (
     .filter(Boolean)
     .join(', ') || 'none';
 
-/** The EC50 to start from when a drug is chosen: a published value, or 0 for unknown. */
-const knownEC50 = (name: string, unit: string): number => {
+/**
+ * The occupancy model to start from when a drug is chosen: its published EC50
+ * (0 for unknown) and maximum occupancy (undefined means 100%).
+ */
+const knownOccupancyModel = (name: string, unit: string): { ec50: number; emax: number | undefined } => {
   const ref = getDrugReference(name);
-  const mg = ref ? ref.ec50_mg : KNOWN_EC50_MG[name];
-  if (mg === undefined) return 0;
-  return unit === 'mcg' ? mg * 1000 : mg;
+  const mg = ref?.ed50_mg ?? KNOWN_EC50_MG[name];
+  return {
+    ec50: mg === undefined ? 0 : unit === 'mcg' ? mg * 1000 : mg,
+    emax: ref?.emax_pct ?? undefined
+  };
 };
+
+/**
+ * Typical strengths for a drug as tablets the plan can use. Plain tablets may
+ * be halved; capsules and modified-release tablets may not be split.
+ */
+const typicalDenominations = (ref: DrugReferenceEntry, unit: string): Denomination[] =>
+  ref.strengths_mg.map((strength, index) => ({
+    id: `typical-${ref.id}-${index}`,
+    strength: unit === 'mcg' ? strength * 1000 : strength,
+    canSplit: ref.form === 'tablet' ? 'half' : 'no'
+  }));
 
 const escapeHtml = (text: string): string =>
   text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -195,79 +210,38 @@ const App: React.FC = () => {
     }
   }, [isDarkMode]);
 
+  // A link from the Visualiser (?drugId=&dose=&unit=&ec50=&emax=&mode=occupancy) sets up that drug.
   useEffect(() => {
     if (typeof window === 'undefined' || !window.location.search) return;
-    try {
-      const params = new URLSearchParams(window.location.search);
-      const drugParam = params.get('drug') || params.get('drugId');
-      const doseParam = Number(params.get('dose'));
-      const ec50Param = Number(params.get('ec50'));
-      const unitParam = params.get('unit') === 'mcg' ? 'mcg' : 'mg';
-      const minDoseParam = Number(params.get('minDose'));
-      const modeParam = params.get('mode');
+    const params = new URLSearchParams(window.location.search);
+    const drugParam = params.get('drugId') || params.get('drug');
+    if (!drugParam) return;
+    const positive = (key: string): number | undefined => {
+      const value = Number(params.get(key));
+      return Number.isFinite(value) && value > 0 ? value : undefined;
+    };
+    const unit = params.get('unit') === 'mcg' ? 'mcg' : 'mg';
+    const dose = positive('dose');
+    const ec50Param = positive('ec50');
+    const emaxParam = positive('emax');
+    const ref = getDrugReference(drugParam);
+    const known = knownOccupancyModel(ref?.name ?? '', unit);
 
-      if (drugParam) {
-        const ref = getDrugReference(drugParam);
-        if (ref) {
-          setIsCustomDrug(false);
-          const scale = unitParam === 'mcg' ? 1000 : 1;
-          const resolvedEc50 =
-            Number.isFinite(ec50Param) && ec50Param > 0
-              ? ec50Param
-              : ref.ec50_mg * scale;
-          const resolvedDose =
-            Number.isFinite(doseParam) && doseParam > 0
-              ? doseParam
-              : ref.defaultDose_mg * scale;
-
-          setDrug(prev => ({
-            ...prev,
-            name: ref.name,
-            unit: unitParam,
-            currentDose: resolvedDose,
-            ec50: resolvedEc50,
-            dosesPerDay: ref.dosesPerDay,
-            denominations: ref.pbsDenominations.map((strength, idx) => ({
-              id: `pbs-${ref.id}-${idx}`,
-              strength: strength * scale,
-              canSplit: ref.defaultSplit
-            })),
-            liquid: prev.liquid
-              ? {
-                  ...prev.liquid,
-                  concentration:
-                    ref.liquidConcentration_mg_ml !== null
-                      ? ref.liquidConcentration_mg_ml * scale
-                      : prev.liquid.concentration
-                }
-              : prev.liquid
-          }));
-
-          setWean(prev => ({
-            ...prev,
-            minimumDoseThreshold:
-              Number.isFinite(minDoseParam) && minDoseParam > 0
-                ? minDoseParam
-                : ref.minStopDose_mg * scale,
-            reductionType: modeParam === 'occupancy' ? 'occupancy' : prev.reductionType
-          }));
-          if (modeParam === 'occupancy') {
-            setShowOccupancy(true);
-          }
-        } else {
-          setIsCustomDrug(true);
-          setDrug(prev => ({
-            ...prev,
-            name: drugParam,
-            unit: unitParam,
-            currentDose: Number.isFinite(doseParam) && doseParam > 0 ? doseParam : prev.currentDose,
-            ec50: Number.isFinite(ec50Param) && ec50Param > 0 ? ec50Param : 0
-          }));
-        }
-      }
-    } catch {
-      // Ignore malformed URL query parameters
-    }
+    setIsCustomDrug(!ref);
+    setDrug(prev => ({
+      ...prev,
+      name: ref ? ref.name : drugParam,
+      unit,
+      currentDose: dose ?? prev.currentDose,
+      ec50: ec50Param ?? known.ec50,
+      emax: emaxParam !== undefined && emaxParam <= 100 ? emaxParam : known.emax,
+      denominations: ref && ref.strengths_mg.length > 0 ? typicalDenominations(ref, unit) : prev.denominations
+    }));
+    const minDose = positive('minDose');
+    if (minDose !== undefined) setWean(prev => ({ ...prev, minimumDoseThreshold: minDose }));
+    if (params.get('mode') === 'occupancy') chooseReductionType('occupancy');
+    // Runs once, on the link the page was opened with.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Derived, not stored: a stale schedule can never outlive an invalid input.
@@ -296,6 +270,7 @@ const App: React.FC = () => {
       name: 'Diazepam',
       unit: 'mg',
       ec50: KNOWN_EC50_MG.Diazepam,
+      emax: undefined,
       currentDose: regimen.steps[0].total,
       denominations: MAUDSLEY_TABLET_STRENGTHS.map((strength, index) => ({
         id: `maudsley-${index}`,
@@ -339,6 +314,7 @@ const App: React.FC = () => {
   const twiceDaily = drug.dosesPerDay === 2;
   const rounding = wean.rounding ?? 'below';
   const ec50 = hasEC50(drug.ec50) ? drug.ec50 : null;
+  const emax = effectiveEmax(drug.emax);
   const occupancyTaper = wean.reductionType === 'occupancy';
   const occupancyShown = showOccupancy && ec50 !== null;
   const reductionText = occupancyTaper
@@ -358,41 +334,18 @@ const App: React.FC = () => {
     const val = e.target.value;
     if (val === 'Other') {
       setIsCustomDrug(true);
-      setDrug(prev => ({ ...prev, name: '', ec50: 0 }));
+      setDrug(prev => ({ ...prev, name: '', ec50: 0, emax: undefined }));
     } else {
       setIsCustomDrug(false);
-      const ref = getDrugReference(val);
-      if (ref) {
-        const scale = drug.unit === 'mcg' ? 1000 : 1;
-        setDrug(prev => ({
-          ...prev,
-          name: ref.name,
-          currentDose: ref.defaultDose_mg * scale,
-          ec50: ref.ec50_mg * scale,
-          dosesPerDay: ref.dosesPerDay,
-          denominations: ref.pbsDenominations.map((strength, idx) => ({
-            id: `pbs-${ref.id}-${idx}`,
-            strength: strength * scale,
-            canSplit: ref.defaultSplit
-          })),
-          liquid: prev.liquid
-            ? {
-                ...prev.liquid,
-                concentration:
-                  ref.liquidConcentration_mg_ml !== null
-                    ? ref.liquidConcentration_mg_ml * scale
-                    : prev.liquid.concentration
-              }
-            : prev.liquid
-        }));
-        setWean(prev => ({
-          ...prev,
-          minimumDoseThreshold: ref.minStopDose_mg * scale
-        }));
-      } else {
-        setDrug(prev => ({ ...prev, name: val, ec50: knownEC50(val, prev.unit) }));
-      }
+      // An EC50 belongs to one drug, so a new drug starts from its own (or none).
+      // Everything else the clinician entered is kept.
+      setDrug(prev => ({ ...prev, name: val, ...knownOccupancyModel(val, prev.unit) }));
     }
+  };
+
+  /** Replaces the tablet list with the drug's typical strengths, when asked. */
+  const applyTypicalStrengths = (ref: DrugReferenceEntry) => {
+    setDrug(prev => ({ ...prev, denominations: typicalDenominations(ref, prev.unit) }));
   };
 
   const printSchedule = () => {
@@ -416,7 +369,7 @@ const App: React.FC = () => {
       `Dosing: ${twiceDaily ? `twice daily (morning and night, ${drug.splitPreference === 'fewest' ? 'fewest pieces' : 'even doses'})` : 'once daily'}`
     ];
     if (occupancyShown) {
-      header.push(`Receptor occupancy: estimated as 100 x dose / (dose + ${ec50}${drug.unit}), the dose for 50% occupancy (EC50)`);
+      header.push(`Receptor occupancy: estimated as ${emax} x dose / (dose + ${ec50}${drug.unit}), where ${ec50}${drug.unit} is the dose for half the maximum occupancy (EC50) and ${emax}% the maximum`);
     }
     if (rounding !== 'below') header.push(`When tablets can't match the target: ${ROUNDING_TEXT[rounding].label.toLowerCase()} (${ROUNDING_TEXT[rounding].summary})`);
     if (wean.reduceOnStartDate) header.push(`First reduction: on the start date (${formatDMY(drug.startDate)})`);
@@ -439,7 +392,7 @@ const App: React.FC = () => {
       }
 
       const to = formatDMY(addDaysISO(step.date, step.durationDays - 1));
-      const occupancy = occupancyShown ? ` (occupancy ${formatDose(receptorOccupancy(step.actualDose, ec50!), 1)}%)` : '';
+      const occupancy = occupancyShown ? ` (occupancy ${formatDose(receptorOccupancy(step.actualDose, ec50!, emax), 1)}%)` : '';
       const lines = [
         `Step ${index + 1}: ${from} to ${to} (${describeDuration(step.durationDays)})`,
         `${formatDose(step.actualDose, 3)}${drug.unit} daily${occupancy}`
@@ -478,7 +431,7 @@ const App: React.FC = () => {
     }
 
     return blocks;
-  }, [schedule, drug, wean, hasSchedule, liquid, liquidOn, liquidOnly, twiceDaily, rounding, ec50, occupancyShown, reductionText]);
+  }, [schedule, drug, wean, hasSchedule, liquid, liquidOn, liquidOnly, twiceDaily, rounding, ec50, emax, occupancyShown, reductionText]);
 
   const emrText = useMemo(() => emrBlocks.map(lines => lines.join('\n')).join('\n\n'), [emrBlocks]);
   const emrHtml = useMemo(
@@ -567,14 +520,12 @@ const App: React.FC = () => {
                     onChange={handleDrugChange}
                     className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-100"
                   >
-                    {DRUG_CATEGORIES.map(category => (
-                      <optgroup key={category} label={category}>
+                    {DRUG_CLASSES.map(drugClass => (
+                      <optgroup key={drugClass} label={drugClass}>
                         {Object.values(DRUG_REFERENCE_BANK)
-                          .filter(entry => entry.drugClass === category)
+                          .filter(entry => entry.drugClass === drugClass)
                           .map(entry => (
-                            <option key={entry.name} value={entry.name}>
-                              {entry.name} (ED50: {entry.ec50_mg}mg · {entry.primaryTarget.split(' ')[0]})
-                            </option>
+                            <option key={entry.name} value={entry.name}>{entry.name}</option>
                           ))}
                       </optgroup>
                     ))}
@@ -884,71 +835,115 @@ const App: React.FC = () => {
 
               {/* Receptor occupancy (Michaelis–Menten) */}
               <div className="pt-4 border-t border-slate-200 dark:border-slate-700">
-                <label htmlFor="ec50" className="block text-xs font-medium text-slate-500 dark:text-slate-400 uppercase mb-1">
-                  Receptor Occupancy: Dose for 50% (EC50)
-                </label>
-                <div className="flex items-center gap-2">
-                  <NumberInput
-                    id="ec50"
-                    min="0"
-                    step="any"
-                    placeholder="Not set"
-                    value={drug.ec50 || undefined}
-                    onChange={v => setDrug(prev => ({ ...prev, ec50: v }))}
-                    className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-100"
-                  />
-                  <span className="text-sm text-slate-400 whitespace-nowrap">{drug.unit}/day</span>
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="col-span-2">
+                    <label htmlFor="ec50" className="block text-xs font-medium text-slate-500 dark:text-slate-400 uppercase mb-1">
+                      Occupancy: Dose for Half Max (EC50)
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <NumberInput
+                        id="ec50"
+                        min="0"
+                        step="any"
+                        placeholder="Not set"
+                        value={drug.ec50 || undefined}
+                        onChange={v => setDrug(prev => ({ ...prev, ec50: v }))}
+                        className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-100"
+                      />
+                      <span className="text-sm text-slate-400 whitespace-nowrap">{drug.unit}/day</span>
+                    </div>
+                  </div>
+                  <div>
+                    <label htmlFor="emax" className="block text-xs font-medium text-slate-500 dark:text-slate-400 uppercase mb-1">
+                      Max (Emax)
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <NumberInput
+                        id="emax"
+                        min="1"
+                        max="100"
+                        step="any"
+                        placeholder="100"
+                        value={drug.emax}
+                        onChange={v => setDrug(prev => ({ ...prev, emax: v > 0 && v <= 100 ? v : undefined }))}
+                        className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-100"
+                      />
+                      <span className="text-sm text-slate-400">%</span>
+                    </div>
+                  </div>
                 </div>
                 <p className="text-xs text-slate-400 dark:text-slate-500 mt-1.5">
                   {ec50 === null
                     ? 'Enter a published value to show the estimated receptor occupancy of each dose. Leave blank to hide it.'
-                    : `Occupancy = 100 × dose ÷ (dose + ${formatDose(ec50, 3)}). The current dose is about ${formatDose(receptorOccupancy(drug.currentDose, ec50), 1)}% occupancy.`}
-                  {drug.name === 'Diazepam' && drug.unit === 'mg' &&
-                    ` ${KNOWN_EC50_MG.Diazepam}mg/day fits every occupancy figure in the Maudsley diazepam tables.`}
+                    : `Occupancy = ${formatDose(emax, 3)} × dose ÷ (dose + ${formatDose(ec50, 3)}). The current dose is about ${formatDose(receptorOccupancy(drug.currentDose, ec50, emax), 1)}% occupancy.`}
+                  {' '}Leave Emax blank for 100%; some drugs never fill all their receptors.
                 </p>
 
                 {(() => {
                   const ref = getDrugReference(drug.name);
                   if (!ref) return null;
+                  const source = ref.source ? BANK_SOURCES[ref.source] : null;
                   const doseMg = drug.unit === 'mcg' ? drug.currentDose / 1000 : drug.currentDose;
+                  const visualiserUrl = buildVisualiserUrl(ref.id, doseMg);
+                  const estimate = ref.evidence === 'derived' || ref.evidence === 'none';
                   return (
                     <div className="mt-3 p-3 rounded-lg bg-teal-50/70 dark:bg-teal-950/30 border border-teal-200 dark:border-teal-800/60 space-y-1.5 text-xs">
                       <div className="flex flex-wrap items-center justify-between gap-1.5">
                         <span className="font-semibold text-teal-900 dark:text-teal-200">
-                          {ref.primaryTarget} · Published ED50: {ref.ec50_mg}mg
+                          {ref.target}
+                          {ref.ed50_mg !== null && ` · EC50 ${ref.ed50_mg}mg`}
+                          {ref.emax_pct !== null && ref.emax_pct < 100 && ` · max ${ref.emax_pct}%`}
                         </span>
-                        <span className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-teal-100 dark:bg-teal-900/70 text-teal-800 dark:text-teal-200">
-                          {ref.evidenceTier}
+                        <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${estimate ? 'bg-amber-100 dark:bg-amber-900/60 text-amber-800 dark:text-amber-200' : 'bg-teal-100 dark:bg-teal-900/70 text-teal-800 dark:text-teal-200'}`}>
+                          {EVIDENCE_LABELS[ref.evidence]}
                         </span>
                       </div>
-                      <p className="text-slate-600 dark:text-slate-300 leading-relaxed">
-                        {ref.clinicalNote}
-                      </p>
-                      <p className="text-slate-500 dark:text-slate-400">
-                        <span className="font-medium">Ref:</span> {ref.citation}
-                        {ref.pmid && (
-                          <>
-                            {' · '}
-                            <a
-                              href={`https://pubmed.ncbi.nlm.nih.gov/${ref.pmid}/`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-teal-700 dark:text-teal-400 underline hover:text-teal-900"
-                            >
-                              PMID: {ref.pmid}
-                            </a>
-                          </>
+                      <p className="text-slate-600 dark:text-slate-300 leading-relaxed">{ref.method}</p>
+                      {ref.ed50_mg !== null && ref.emax_pct === null && (
+                        <p className="text-slate-500 dark:text-slate-400">
+                          The source gave no maximum occupancy, so 100% is assumed; occupancy near the top of the curve may be overstated.
+                        </p>
+                      )}
+                      {ref.note && <p className="text-slate-600 dark:text-slate-300 leading-relaxed">{ref.note}</p>}
+                      {source && (
+                        <p className="text-slate-500 dark:text-slate-400">
+                          <span className="font-medium">Source:</span> {source.citation}
+                          {source.pmid && (
+                            <>
+                              {' · '}
+                              <a
+                                href={`https://pubmed.ncbi.nlm.nih.gov/${source.pmid}/`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-teal-700 dark:text-teal-400 underline hover:text-teal-900"
+                              >
+                                PMID {source.pmid}
+                              </a>
+                            </>
+                          )}
+                        </p>
+                      )}
+                      <div className="pt-1 flex flex-wrap gap-x-4 gap-y-1">
+                        {ref.strengths_mg.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => applyTypicalStrengths(ref)}
+                            className="font-semibold text-teal-700 dark:text-teal-300 hover:text-teal-900 dark:hover:text-teal-100 underline"
+                            title="Replaces the tablet list above. Check the patient's brand: not every tablet is scored, and availability changes."
+                          >
+                            Use typical strengths ({ref.strengths_mg.join(', ')}mg{ref.form === 'tablet' ? '' : ref.form === 'capsule' ? ' capsules' : ' modified-release'})
+                          </button>
                         )}
-                      </p>
-                      <div className="pt-1">
-                        <a
-                          href={buildVisualiserUrl(ref.id, doseMg)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 font-semibold text-teal-700 dark:text-teal-300 hover:text-teal-900 dark:hover:text-teal-100 underline"
-                        >
-                          View 18-Receptor Profile &amp; CYP Modifiers in Visualiser →
-                        </a>
+                        {visualiserUrl && (
+                          <a
+                            href={visualiserUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="font-semibold text-teal-700 dark:text-teal-300 hover:text-teal-900 dark:hover:text-teal-100 underline"
+                          >
+                            Open in the Visualiser →
+                          </a>
+                        )}
                       </div>
                     </div>
                   );
@@ -972,9 +967,10 @@ const App: React.FC = () => {
                     role="radio"
                     aria-checked={wean.reductionType === 'percentage'}
                     onClick={() => chooseReductionType('percentage')}
+                    title="Cuts the same percentage of the current dose each time, so the dose falls exponentially. The Maudsley guidelines often call this a hyperbolic taper, because it roughly approximates equal steps in receptor occupancy."
                     className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-all ${wean.reductionType === 'percentage' ? 'bg-white dark:bg-slate-800 text-teal-600 dark:text-teal-400 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
                   >
-                    Hyperbolic (%)
+                    Exponential (%)
                   </button>
                   <button
                     role="radio"
@@ -988,9 +984,10 @@ const App: React.FC = () => {
                     role="radio"
                     aria-checked={occupancyTaper}
                     onClick={() => chooseReductionType('occupancy')}
+                    title="Lowers estimated receptor occupancy by the same number of points each time, so the dose follows a hyperbola. Needs the drug's ED50."
                     className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-all ${occupancyTaper ? 'bg-white dark:bg-slate-800 text-teal-600 dark:text-teal-400 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
                   >
-                    Occupancy
+                    Hyperbolic (Occupancy)
                   </button>
                 </div>
                </div>
@@ -1062,7 +1059,7 @@ const App: React.FC = () => {
                  <p className="text-xs text-slate-400 flex items-start gap-1">
                    <Info size={14} className="mt-0.5 flex-shrink-0" />
                    {occupancyTaper
-                    ? `Lowers estimated receptor occupancy by ${wean.reductionValue} percentage points every ${wean.intervalDays} days${ec50 !== null ? ` (from ${formatDose(receptorOccupancy(drug.currentDose, ec50), 1)}%)` : ''}, so the dose cuts get smaller as the dose falls, until ${wean.minimumDoseThreshold}${drug.unit} is reached. ${ROUNDING_TEXT[rounding].summary}`
+                    ? `Lowers estimated receptor occupancy by ${wean.reductionValue} percentage points every ${wean.intervalDays} days${ec50 !== null ? ` (from ${formatDose(receptorOccupancy(drug.currentDose, ec50, emax), 1)}%)` : ''}, so the dose cuts get smaller as the dose falls, until ${wean.minimumDoseThreshold}${drug.unit} is reached. ${ROUNDING_TEXT[rounding].summary}`
                     : `Reduces the target dose by ${reductionText} every ${wean.intervalDays} days until ${wean.minimumDoseThreshold}${drug.unit} is reached. ${ROUNDING_TEXT[rounding].summary}`}
                  </p>
                </div>
@@ -1165,6 +1162,7 @@ const App: React.FC = () => {
                   isDarkMode={isDarkMode}
                   reference={referenceCurve}
                   ec50={ec50}
+                  emax={emax}
                 />
 
                 <CalculationBreakdown drug={drug} wean={wean} schedule={schedule} />
@@ -1231,7 +1229,7 @@ const App: React.FC = () => {
                                  )}
                                  {occupancyShown && (
                                    <span className="text-xs text-violet-600 dark:text-violet-300">
-                                     Occupancy: {formatDose(receptorOccupancy(step.actualDose, ec50!), 1)}%
+                                     Occupancy: {formatDose(receptorOccupancy(step.actualDose, ec50!, emax), 1)}%
                                    </span>
                                  )}
                                  {!step.isStop && step.actualDose < step.targetDose * 0.9 && (
@@ -1247,7 +1245,7 @@ const App: React.FC = () => {
                                  {!step.isStop && step.reductionPercent !== null && (
                                    <span className={`text-[10px] mt-1 ${step.steeperThanRequested ? 'text-amber-500 font-semibold' : 'text-slate-400 dark:text-slate-500'}`}>
                                      ↓ {formatDose(step.reductionFromPrevious ?? 0, 3)}{drug.unit} ({formatDose(step.reductionPercent, 1)}%
-                                     {occupancyShown && `, ${formatDose(receptorOccupancy(step.actualDose + (step.reductionFromPrevious ?? 0), ec50) - receptorOccupancy(step.actualDose, ec50), 1)} occupancy pts`}) from previous dose
+                                     {occupancyShown && `, ${formatDose(receptorOccupancy(step.actualDose + (step.reductionFromPrevious ?? 0), ec50, emax) - receptorOccupancy(step.actualDose, ec50, emax), 1)} occupancy pts`}) from previous dose
                                    </span>
                                  )}
                               </div>

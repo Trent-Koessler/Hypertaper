@@ -18,8 +18,10 @@ interface WeanChartProps {
    * Its doses are the source's, sampled at the plan's own reduction interval.
    */
   reference?: { name: string; points: { dayIndex: number; dose: number }[] } | null;
-  /** Dose for 50% receptor occupancy; when set, the y axis can show occupancy. */
+  /** Dose for half the maximum receptor occupancy; when set, the y axis can show occupancy. */
   ec50?: number | null;
+  /** Maximum receptor occupancy in percent; 100 when absent. */
+  emax?: number;
 }
 
 interface ChartPoint {
@@ -124,7 +126,8 @@ const WeanChart: React.FC<WeanChartProps> = ({
   endDate,
   isDarkMode,
   reference,
-  ec50
+  ec50,
+  emax = 100
 }) => {
   const [tickMode, setTickMode] = useState<TickMode>('auto');
   const [yScale, setYScale] = useState<YScale>('linear');
@@ -206,7 +209,7 @@ const WeanChart: React.FC<WeanChartProps> = ({
 
   const scaleValue = (value: number | undefined): number | undefined =>
     value === undefined ? undefined
-      : yUnit === 'occupancy' && ec50 ? parseFloat(receptorOccupancy(value, ec50).toFixed(2))
+      : yUnit === 'occupancy' && ec50 ? parseFloat(receptorOccupancy(value, ec50, emax).toFixed(2))
       : yUnit === 'percent' && startingDose > 0 ? parseFloat(((value / startingDose) * 100).toFixed(2))
       : value;
 
@@ -260,7 +263,7 @@ const WeanChart: React.FC<WeanChartProps> = ({
         reference: p.reference === 0 ? lastReference : p.reference
       };
     });
-  }, [allPoints, from, to, yScale, yUnit, startingDose, ec50]);
+  }, [allPoints, from, to, yScale, yUnit, startingDose, ec50, emax]);
 
   const ticks = useMemo(() => buildTicks(from, to, tickMode), [from, to, tickMode]);
 
@@ -385,7 +388,7 @@ const WeanChart: React.FC<WeanChartProps> = ({
 
       {yUnit === 'occupancy' && (
         <p className="text-[11px] text-slate-400 dark:text-slate-500 mb-2">
-          Estimated receptor occupancy, 100 × dose ÷ (dose + {ec50}{unit}). On a linear scale, an occupancy
+          Estimated receptor occupancy, {emax} × dose ÷ (dose + {ec50}{unit}). On a linear scale, an occupancy
           taper&apos;s ideal target is a straight line.
         </p>
       )}
