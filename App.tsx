@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Pill, Calculator, Calendar, Info, AlertCircle, AlertTriangle, Plus, Trash2, Printer, Scissors, Sun, Moon, Copy, Check, Droplet } from 'lucide-react';
 import { DrugConfig, WeanConfig, Denomination, ScheduleStep, LiquidConfig, DoseBreakdown, DoseRounding } from './types';
 import { generateSchedule } from './services/weaningLogic';
-import { KNOWN_EC50_MG, hasEC50, receptorOccupancy } from './services/occupancy';
+import { KNOWN_EC50_MG, DRUG_REFERENCE_BANK, DrugCategory, getDrugReference, buildVisualiserUrl, hasEC50, receptorOccupancy } from './services/occupancy';
 import { addDaysISO, formatDMY, formatISODate, todayISO } from './services/dateUtils';
 import WeanChart from './components/WeanChart';
 import TabletVisualizer from './components/TabletVisualizer';
@@ -20,18 +20,18 @@ import {
   maudsleyCurve
 } from './services/maudsleyDiazepam';
 
+const DRUG_CATEGORIES: DrugCategory[] = [
+  'Benzodiazepines & Z-Drugs',
+  'Antidepressants (SSRIs, SNRIs & Atypicals)',
+  'Antidepressants (TCAs & MAOIs)',
+  'Antipsychotics (Second & Third Generation)',
+  'Antipsychotics (First Generation)',
+  'Gabapentinoids',
+  'ADHD, Sedative & Rescue Agents'
+];
+
 const COMMON_DRUGS = [
-  "Sertraline",
-  "Venlafaxine",
-  "Citalopram",
-  "Escitalopram",
-  "Paroxetine",
-  "Duloxetine",
-  "Fluoxetine",
-  "Mirtazapine",
-  "Diazepam",
-  "Gabapentin",
-  "Pregabalin",
+  ...Object.keys(DRUG_REFERENCE_BANK),
   "Other"
 ];
 
@@ -118,7 +118,8 @@ const describeTablets = (
 
 /** The EC50 to start from when a drug is chosen: a published value, or 0 for unknown. */
 const knownEC50 = (name: string, unit: string): number => {
-  const mg = KNOWN_EC50_MG[name];
+  const ref = getDrugReference(name);
+  const mg = ref ? ref.ec50_mg : KNOWN_EC50_MG[name];
   if (mg === undefined) return 0;
   return unit === 'mcg' ? mg * 1000 : mg;
 };
@@ -193,6 +194,81 @@ const App: React.FC = () => {
       // Persisting the preference is best-effort.
     }
   }, [isDarkMode]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.location.search) return;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const drugParam = params.get('drug') || params.get('drugId');
+      const doseParam = Number(params.get('dose'));
+      const ec50Param = Number(params.get('ec50'));
+      const unitParam = params.get('unit') === 'mcg' ? 'mcg' : 'mg';
+      const minDoseParam = Number(params.get('minDose'));
+      const modeParam = params.get('mode');
+
+      if (drugParam) {
+        const ref = getDrugReference(drugParam);
+        if (ref) {
+          setIsCustomDrug(false);
+          const scale = unitParam === 'mcg' ? 1000 : 1;
+          const resolvedEc50 =
+            Number.isFinite(ec50Param) && ec50Param > 0
+              ? ec50Param
+              : ref.ec50_mg * scale;
+          const resolvedDose =
+            Number.isFinite(doseParam) && doseParam > 0
+              ? doseParam
+              : ref.defaultDose_mg * scale;
+
+          setDrug(prev => ({
+            ...prev,
+            name: ref.name,
+            unit: unitParam,
+            currentDose: resolvedDose,
+            ec50: resolvedEc50,
+            dosesPerDay: ref.dosesPerDay,
+            denominations: ref.pbsDenominations.map((strength, idx) => ({
+              id: `pbs-${ref.id}-${idx}`,
+              strength: strength * scale,
+              canSplit: ref.defaultSplit
+            })),
+            liquid: prev.liquid
+              ? {
+                  ...prev.liquid,
+                  concentration:
+                    ref.liquidConcentration_mg_ml !== null
+                      ? ref.liquidConcentration_mg_ml * scale
+                      : prev.liquid.concentration
+                }
+              : prev.liquid
+          }));
+
+          setWean(prev => ({
+            ...prev,
+            minimumDoseThreshold:
+              Number.isFinite(minDoseParam) && minDoseParam > 0
+                ? minDoseParam
+                : ref.minStopDose_mg * scale,
+            reductionType: modeParam === 'occupancy' ? 'occupancy' : prev.reductionType
+          }));
+          if (modeParam === 'occupancy') {
+            setShowOccupancy(true);
+          }
+        } else {
+          setIsCustomDrug(true);
+          setDrug(prev => ({
+            ...prev,
+            name: drugParam,
+            unit: unitParam,
+            currentDose: Number.isFinite(doseParam) && doseParam > 0 ? doseParam : prev.currentDose,
+            ec50: Number.isFinite(ec50Param) && ec50Param > 0 ? ec50Param : 0
+          }));
+        }
+      }
+    } catch {
+      // Ignore malformed URL query parameters
+    }
+  }, []);
 
   // Derived, not stored: a stale schedule can never outlive an invalid input.
   const schedule = useMemo(() => generateSchedule(drug, wean), [drug, wean]);
@@ -285,8 +361,37 @@ const App: React.FC = () => {
       setDrug(prev => ({ ...prev, name: '', ec50: 0 }));
     } else {
       setIsCustomDrug(false);
-      // An EC50 belongs to one drug, so a new drug starts from its own (or none).
-      setDrug(prev => ({ ...prev, name: val, ec50: knownEC50(val, prev.unit) }));
+      const ref = getDrugReference(val);
+      if (ref) {
+        const scale = drug.unit === 'mcg' ? 1000 : 1;
+        setDrug(prev => ({
+          ...prev,
+          name: ref.name,
+          currentDose: ref.defaultDose_mg * scale,
+          ec50: ref.ec50_mg * scale,
+          dosesPerDay: ref.dosesPerDay,
+          denominations: ref.pbsDenominations.map((strength, idx) => ({
+            id: `pbs-${ref.id}-${idx}`,
+            strength: strength * scale,
+            canSplit: ref.defaultSplit
+          })),
+          liquid: prev.liquid
+            ? {
+                ...prev.liquid,
+                concentration:
+                  ref.liquidConcentration_mg_ml !== null
+                    ? ref.liquidConcentration_mg_ml * scale
+                    : prev.liquid.concentration
+              }
+            : prev.liquid
+        }));
+        setWean(prev => ({
+          ...prev,
+          minimumDoseThreshold: ref.minStopDose_mg * scale
+        }));
+      } else {
+        setDrug(prev => ({ ...prev, name: val, ec50: knownEC50(val, prev.unit) }));
+      }
     }
   };
 
@@ -462,9 +567,18 @@ const App: React.FC = () => {
                     onChange={handleDrugChange}
                     className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-100"
                   >
-                    {COMMON_DRUGS.map(d => (
-                      <option key={d} value={d}>{d}</option>
+                    {DRUG_CATEGORIES.map(category => (
+                      <optgroup key={category} label={category}>
+                        {Object.values(DRUG_REFERENCE_BANK)
+                          .filter(entry => entry.drugClass === category)
+                          .map(entry => (
+                            <option key={entry.name} value={entry.name}>
+                              {entry.name} (ED50: {entry.ec50_mg}mg · {entry.primaryTarget.split(' ')[0]})
+                            </option>
+                          ))}
+                      </optgroup>
                     ))}
+                    <option value="Other">Other (custom medication)</option>
                   </select>
                 ) : (
                   <div className="flex gap-2">
@@ -792,6 +906,53 @@ const App: React.FC = () => {
                   {drug.name === 'Diazepam' && drug.unit === 'mg' &&
                     ` ${KNOWN_EC50_MG.Diazepam}mg/day fits every occupancy figure in the Maudsley diazepam tables.`}
                 </p>
+
+                {(() => {
+                  const ref = getDrugReference(drug.name);
+                  if (!ref) return null;
+                  const doseMg = drug.unit === 'mcg' ? drug.currentDose / 1000 : drug.currentDose;
+                  return (
+                    <div className="mt-3 p-3 rounded-lg bg-teal-50/70 dark:bg-teal-950/30 border border-teal-200 dark:border-teal-800/60 space-y-1.5 text-xs">
+                      <div className="flex flex-wrap items-center justify-between gap-1.5">
+                        <span className="font-semibold text-teal-900 dark:text-teal-200">
+                          {ref.primaryTarget} · Published ED50: {ref.ec50_mg}mg
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-teal-100 dark:bg-teal-900/70 text-teal-800 dark:text-teal-200">
+                          {ref.evidenceTier}
+                        </span>
+                      </div>
+                      <p className="text-slate-600 dark:text-slate-300 leading-relaxed">
+                        {ref.clinicalNote}
+                      </p>
+                      <p className="text-slate-500 dark:text-slate-400">
+                        <span className="font-medium">Ref:</span> {ref.citation}
+                        {ref.pmid && (
+                          <>
+                            {' · '}
+                            <a
+                              href={`https://pubmed.ncbi.nlm.nih.gov/${ref.pmid}/`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-teal-700 dark:text-teal-400 underline hover:text-teal-900"
+                            >
+                              PMID: {ref.pmid}
+                            </a>
+                          </>
+                        )}
+                      </p>
+                      <div className="pt-1">
+                        <a
+                          href={buildVisualiserUrl(ref.id, doseMg)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 font-semibold text-teal-700 dark:text-teal-300 hover:text-teal-900 dark:hover:text-teal-100 underline"
+                        >
+                          View 18-Receptor Profile &amp; CYP Modifiers in Visualiser →
+                        </a>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           </div>
