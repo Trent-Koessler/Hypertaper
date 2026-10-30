@@ -1,0 +1,251 @@
+{
+  "version": "3.0.0",
+  "lastUpdated": "2026-10-29",
+  "about": "Master copy of the dose-occupancy values shared by the Psychopharmacology Visualiser and HyperTaper. Edit this file only, then run `node scripts/sync-ed50-bank.mjs` to regenerate ed50-bank.js (and copy this file into HyperTaper if it sits next to this repo).",
+  "model": "occupancy (%) = emax_pct x dose / (dose + ed50_mg). ed50_mg is the daily dose giving half of the maximum occupancy. When emax_pct is null the source did not report a maximum and 100% is assumed.",
+  "evidenceLevels": {
+    "reported": "ED50 stated in the cited source.",
+    "back-calculated": "ED50 solved from dose-occupancy tables printed in the cited source, using the maximum occupancy that source reports.",
+    "fitted": "ED50 fitted to dose-occupancy figures in the cited source.",
+    "derived": "Not measured for this drug: worked out from another drug's value with a stated conversion. Treat as a rough estimate.",
+    "none": "No usable human occupancy data found. Enter a value by hand if you have one."
+  },
+  "sources": {
+    "sorensen2022": {
+      "citation": "Sørensen A, Ruhé HG, Munkholm K. The relationship between dose and serotonin transporter occupancy of antidepressants: a systematic review. Mol Psychiatry 2022;27:192–201.",
+      "pmid": "34548628",
+      "doi": "10.1038/s41380-021-01285-w"
+    },
+    "lako2013": {
+      "citation": "Lako IM, van den Heuvel ER, Knegtering H, Bruggeman R, Taxis K. Estimating dopamine D2 receptor occupancy for doses of 8 antipsychotics: a meta-analysis. J Clin Psychopharmacol 2013;33:675–681.",
+      "pmid": "23948784",
+      "doi": "10.1097/JCP.0b013e3182983ffa"
+    },
+    "horowitz2021": {
+      "citation": "Horowitz MA, Jauhar S, Natesan S, Murray RM, Taylor D. A method for tapering antipsychotic treatment that may minimize the risk of relapse. Schizophr Bull 2021;47:1116–1129.",
+      "pmid": "33754644",
+      "doi": "10.1093/schbul/sbab017"
+    },
+    "volkow1998": {
+      "citation": "Volkow ND, Wang GJ, Fowler JS, et al. Dopamine transporter occupancies in the human brain induced by therapeutic doses of oral methylphenidate. Am J Psychiatry 1998;155:1325–1331.",
+      "pmid": "9766762",
+      "doi": "10.1176/ajp.155.10.1325"
+    },
+    "maudsley2024": {
+      "citation": "Horowitz MA, Taylor D. The Maudsley Deprescribing Guidelines. Wiley-Blackwell, 2024 (diazepam tapering tables).",
+      "pmid": null,
+      "doi": null
+    },
+    "ashton2002": {
+      "citation": "Ashton CH. Benzodiazepines: How They Work and How to Withdraw (the Ashton Manual), 2002. Table of approximate equivalent doses to diazepam 10 mg.",
+      "pmid": null,
+      "doi": null
+    }
+  },
+  "drugs": {
+    "citalopram": {
+      "name": "Citalopram", "drugClass": "Antidepressants", "visualiserId": "citalopram", "target": "SERT",
+      "ed50_mg": 3.4, "emax_pct": null, "evidence": "reported", "source": "sorensen2022",
+      "method": "ED50 reported in Sørensen et al. 2022 (from the individual PET studies it reviewed).",
+      "form": "tablet", "strengths_mg": [10, 20, 40], "note": null
+    },
+    "escitalopram": {
+      "name": "Escitalopram", "drugClass": "Antidepressants", "visualiserId": "escitalopram", "target": "SERT",
+      "ed50_mg": 1.7, "emax_pct": null, "evidence": "derived", "source": "sorensen2022",
+      "method": "Half the citalopram ED50 (3.4 mg), because escitalopram is the active half (S-enantiomer) of citalopram. Sørensen et al. 2022 did not report an escitalopram ED50.",
+      "form": "tablet", "strengths_mg": [10, 20], "note": null
+    },
+    "sertraline": {
+      "name": "Sertraline", "drugClass": "Antidepressants", "visualiserId": "sertraline", "target": "SERT",
+      "ed50_mg": 9.1, "emax_pct": null, "evidence": "reported", "source": "sorensen2022",
+      "method": "ED50 reported in Sørensen et al. 2022.",
+      "form": "tablet", "strengths_mg": [50, 100], "note": null
+    },
+    "paroxetine": {
+      "name": "Paroxetine", "drugClass": "Antidepressants", "visualiserId": "paroxetine", "target": "SERT",
+      "ed50_mg": 5, "emax_pct": null, "evidence": "reported", "source": "sorensen2022",
+      "method": "ED50 reported in Sørensen et al. 2022.",
+      "form": "tablet", "strengths_mg": [20], "note": null
+    },
+    "fluoxetine": {
+      "name": "Fluoxetine", "drugClass": "Antidepressants", "visualiserId": "fluoxetine", "target": "SERT",
+      "ed50_mg": 2.7, "emax_pct": null, "evidence": "reported", "source": "sorensen2022",
+      "method": "ED50 reported in Sørensen et al. 2022.",
+      "form": "capsule", "strengths_mg": [20], "note": "Its long-acting metabolite (norfluoxetine) slows the fall in occupancy after each dose change."
+    },
+    "fluvoxamine": {
+      "name": "Fluvoxamine", "drugClass": "Antidepressants", "visualiserId": "fluvoxamine", "target": "SERT",
+      "ed50_mg": null, "emax_pct": null, "evidence": "none", "source": null,
+      "method": "Sørensen et al. 2022 found only one small fluvoxamine study and reported no ED50.",
+      "form": "tablet", "strengths_mg": [50, 100], "note": null
+    },
+    "venlafaxine": {
+      "name": "Venlafaxine", "drugClass": "Antidepressants", "visualiserId": "venlafaxine", "target": "SERT",
+      "ed50_mg": 5.8, "emax_pct": null, "evidence": "reported", "source": "sorensen2022",
+      "method": "ED50 reported in Sørensen et al. 2022 (extended-release venlafaxine).",
+      "form": "capsule", "strengths_mg": [37.5, 75, 150], "note": "Modified-release capsules: do not split or crush."
+    },
+    "desvenlafaxine": {
+      "name": "Desvenlafaxine", "drugClass": "Antidepressants", "visualiserId": "desvenlafaxine", "target": "SERT",
+      "ed50_mg": 14.4, "emax_pct": null, "evidence": "reported", "source": "sorensen2022",
+      "method": "ED50 reported in Sørensen et al. 2022.",
+      "form": "modified-release", "strengths_mg": [50, 100], "note": "Modified-release tablets: do not split or crush."
+    },
+    "duloxetine": {
+      "name": "Duloxetine", "drugClass": "Antidepressants", "visualiserId": "duloxetine", "target": "SERT",
+      "ed50_mg": 7.9, "emax_pct": null, "evidence": "reported", "source": "sorensen2022",
+      "method": "ED50 reported in Sørensen et al. 2022.",
+      "form": "capsule", "strengths_mg": [30, 60], "note": "Enteric-coated capsules: do not crush."
+    },
+    "vortioxetine": {
+      "name": "Vortioxetine", "drugClass": "Antidepressants", "visualiserId": "vortioxetine", "target": "SERT",
+      "ed50_mg": 8.5, "emax_pct": null, "evidence": "reported", "source": "sorensen2022",
+      "method": "ED50 reported in Sørensen et al. 2022.",
+      "form": "tablet", "strengths_mg": [5, 10, 20], "note": null
+    },
+    "mirtazapine": {
+      "name": "Mirtazapine", "drugClass": "Antidepressants", "visualiserId": "mirtazapine", "target": "H1",
+      "ed50_mg": null, "emax_pct": null, "evidence": "none", "source": null,
+      "method": "No verified human dose-occupancy curve found.",
+      "form": "tablet", "strengths_mg": [15, 30, 45], "note": null
+    },
+    "agomelatine": {
+      "name": "Agomelatine", "drugClass": "Antidepressants", "visualiserId": "agomelatine", "target": "MT1/MT2",
+      "ed50_mg": null, "emax_pct": null, "evidence": "none", "source": null,
+      "method": "No human receptor-occupancy data found.",
+      "form": "tablet", "strengths_mg": [25], "note": null
+    },
+    "amitriptyline": {
+      "name": "Amitriptyline", "drugClass": "Antidepressants", "visualiserId": "amitriptyline", "target": "SERT",
+      "ed50_mg": null, "emax_pct": null, "evidence": "none", "source": null,
+      "method": "No verified human dose-occupancy curve found.",
+      "form": "tablet", "strengths_mg": [10, 25, 50], "note": null
+    },
+    "nortriptyline": {
+      "name": "Nortriptyline", "drugClass": "Antidepressants", "visualiserId": "nortriptyline", "target": "NET",
+      "ed50_mg": null, "emax_pct": null, "evidence": "none", "source": null,
+      "method": "No verified human dose-occupancy curve found.",
+      "form": "tablet", "strengths_mg": [10, 25], "note": null
+    },
+    "haloperidol": {
+      "name": "Haloperidol", "drugClass": "Antipsychotics", "visualiserId": "haloperidol", "target": "D2",
+      "ed50_mg": 0.65, "emax_pct": 91.9, "evidence": "back-calculated", "source": "horowitz2021",
+      "method": "Solved from Horowitz et al. 2021 Table 3 (e.g. 1 mg = 55.7%, 4 mg = 79.0%, 10 mg = 86.3%), which uses the Lako et al. 2013 curve; maximum occupancy 91.9% from Lako et al. 2013.",
+      "form": "tablet", "strengths_mg": [0.5, 1.5, 5], "note": null
+    },
+    "risperidone": {
+      "name": "Risperidone", "drugClass": "Antipsychotics", "visualiserId": "risperidone", "target": "D2",
+      "ed50_mg": 1.1, "emax_pct": 92.4, "evidence": "back-calculated", "source": "horowitz2021",
+      "method": "Solved from the risperidone column of Horowitz et al. 2021 Table 4 (reproduces every step to 2 significant figures); maximum occupancy 92.4% from Lako et al. 2013.",
+      "form": "tablet", "strengths_mg": [0.5, 1, 2, 3, 4], "note": null
+    },
+    "olanzapine": {
+      "name": "Olanzapine", "drugClass": "Antipsychotics", "visualiserId": "olanzapine", "target": "D2",
+      "ed50_mg": 6.4, "emax_pct": 96.5, "evidence": "back-calculated", "source": "horowitz2021",
+      "method": "Solved from the olanzapine column of Horowitz et al. 2021 Table 4; maximum occupancy 96.5% from Lako et al. 2013.",
+      "form": "tablet", "strengths_mg": [2.5, 5, 7.5, 10, 15, 20], "note": null
+    },
+    "quetiapine": {
+      "name": "Quetiapine", "drugClass": "Antipsychotics", "visualiserId": "quetiapine", "target": "D2",
+      "ed50_mg": 370, "emax_pct": 49.1, "evidence": "back-calculated", "source": "horowitz2021",
+      "method": "Solved from the quetiapine column of Horowitz et al. 2021 Table 4; maximum D2 occupancy 49.1% from Lako et al. 2013 (wide confidence interval, 18.7–79.6%).",
+      "form": "tablet", "strengths_mg": [25, 100, 200, 300], "note": "Low and short-lived D2 occupancy: withdrawal effects at low doses are probably driven more by H1 and other receptors than by D2."
+    },
+    "clozapine": {
+      "name": "Clozapine", "drugClass": "Antipsychotics", "visualiserId": "clozapine", "target": "D2",
+      "ed50_mg": 125, "emax_pct": 61.7, "evidence": "back-calculated", "source": "horowitz2021",
+      "method": "Solved from the clozapine column of Horowitz et al. 2021 Table 4; maximum D2 occupancy 61.7% from Lako et al. 2013.",
+      "form": "tablet", "strengths_mg": [25, 100], "note": "Cholinergic rebound is common when clozapine is reduced quickly."
+    },
+    "amisulpride": {
+      "name": "Amisulpride", "drugClass": "Antipsychotics", "visualiserId": "amisulpride", "target": "D2",
+      "ed50_mg": 130, "emax_pct": 85.0, "evidence": "back-calculated", "source": "horowitz2021",
+      "method": "Solved from the amisulpride column of Horowitz et al. 2021 Table 4; maximum occupancy 85.0% from Lako et al. 2013.",
+      "form": "tablet", "strengths_mg": [100, 200, 400], "note": null
+    },
+    "aripiprazole": {
+      "name": "Aripiprazole", "drugClass": "Antipsychotics", "visualiserId": "aripiprazole", "target": "D2",
+      "ed50_mg": null, "emax_pct": null, "evidence": "none", "source": null,
+      "method": "Horowitz et al. 2021 left aripiprazole out because the Lako et al. 2013 curve fitted the data poorly.",
+      "form": "tablet", "strengths_mg": [], "note": null
+    },
+    "paliperidone": {
+      "name": "Paliperidone", "drugClass": "Antipsychotics", "visualiserId": "paliperidone", "target": "D2",
+      "ed50_mg": null, "emax_pct": null, "evidence": "none", "source": null,
+      "method": "No verified human dose-occupancy curve found.",
+      "form": "modified-release", "strengths_mg": [3, 6, 9], "note": "Modified-release tablets: do not split or crush."
+    },
+    "methylphenidate": {
+      "name": "Methylphenidate", "drugClass": "ADHD medicines", "visualiserId": "methylphenidate", "target": "DAT",
+      "ed50_mg": 18, "emax_pct": 100, "evidence": "fitted", "source": "volkow1998",
+      "method": "Fitted to the mean DAT occupancies in Volkow et al. 1998 (5 mg 12%, 10 mg 40%, 20 mg 54%, 40 mg 72%, 60 mg 74%; single immediate-release doses, 2 h after the dose). The paper itself gives 0.25 mg/kg.",
+      "form": "tablet", "strengths_mg": [10], "note": "Measured after single doses at peak level; occupancy later in the day will be lower."
+    },
+    "diazepam": {
+      "name": "Diazepam", "drugClass": "Benzodiazepines & Z-drugs", "visualiserId": null, "target": "GABA-A",
+      "ed50_mg": 24.7, "emax_pct": 100, "evidence": "fitted", "source": "maudsley2024",
+      "method": "24.7 mg/day reproduces every occupancy figure in the Maudsley diazepam tapering tables.",
+      "form": "tablet", "strengths_mg": [2, 5], "note": null
+    },
+    "alprazolam": {
+      "name": "Alprazolam", "drugClass": "Benzodiazepines & Z-drugs", "visualiserId": null, "target": "GABA-A",
+      "ed50_mg": 1.24, "emax_pct": 100, "evidence": "derived", "source": "ashton2002",
+      "method": "Diazepam value scaled by the Ashton Manual equivalence (alprazolam 0.5 mg ≈ diazepam 10 mg). Equivalence tables vary between sources.",
+      "form": "tablet", "strengths_mg": [0.25, 0.5, 1, 2], "note": null
+    },
+    "clonazepam": {
+      "name": "Clonazepam", "drugClass": "Benzodiazepines & Z-drugs", "visualiserId": null, "target": "GABA-A",
+      "ed50_mg": 1.24, "emax_pct": 100, "evidence": "derived", "source": "ashton2002",
+      "method": "Diazepam value scaled by the Ashton Manual equivalence (clonazepam 0.5 mg ≈ diazepam 10 mg). Equivalence tables vary between sources.",
+      "form": "tablet", "strengths_mg": [0.5, 2], "note": null
+    },
+    "lorazepam": {
+      "name": "Lorazepam", "drugClass": "Benzodiazepines & Z-drugs", "visualiserId": null, "target": "GABA-A",
+      "ed50_mg": 2.47, "emax_pct": 100, "evidence": "derived", "source": "ashton2002",
+      "method": "Diazepam value scaled by the Ashton Manual equivalence (lorazepam 1 mg ≈ diazepam 10 mg). Equivalence tables vary between sources.",
+      "form": "tablet", "strengths_mg": [1, 2.5], "note": null
+    },
+    "nitrazepam": {
+      "name": "Nitrazepam", "drugClass": "Benzodiazepines & Z-drugs", "visualiserId": null, "target": "GABA-A",
+      "ed50_mg": 24.7, "emax_pct": 100, "evidence": "derived", "source": "ashton2002",
+      "method": "Diazepam value scaled by the Ashton Manual equivalence (nitrazepam 10 mg ≈ diazepam 10 mg). Equivalence tables vary between sources.",
+      "form": "tablet", "strengths_mg": [5], "note": null
+    },
+    "oxazepam": {
+      "name": "Oxazepam", "drugClass": "Benzodiazepines & Z-drugs", "visualiserId": null, "target": "GABA-A",
+      "ed50_mg": 49.4, "emax_pct": 100, "evidence": "derived", "source": "ashton2002",
+      "method": "Diazepam value scaled by the Ashton Manual equivalence (oxazepam 20 mg ≈ diazepam 10 mg). Equivalence tables vary between sources.",
+      "form": "tablet", "strengths_mg": [15, 30], "note": null
+    },
+    "temazepam": {
+      "name": "Temazepam", "drugClass": "Benzodiazepines & Z-drugs", "visualiserId": null, "target": "GABA-A",
+      "ed50_mg": 49.4, "emax_pct": 100, "evidence": "derived", "source": "ashton2002",
+      "method": "Diazepam value scaled by the Ashton Manual equivalence (temazepam 20 mg ≈ diazepam 10 mg). Equivalence tables vary between sources.",
+      "form": "tablet", "strengths_mg": [10], "note": null
+    },
+    "zolpidem": {
+      "name": "Zolpidem", "drugClass": "Benzodiazepines & Z-drugs", "visualiserId": null, "target": "GABA-A",
+      "ed50_mg": 49.4, "emax_pct": 100, "evidence": "derived", "source": "ashton2002",
+      "method": "Diazepam value scaled by the Ashton Manual equivalence (zolpidem 20 mg ≈ diazepam 10 mg). Equivalence tables vary between sources.",
+      "form": "tablet", "strengths_mg": [10], "note": null
+    },
+    "zopiclone": {
+      "name": "Zopiclone", "drugClass": "Benzodiazepines & Z-drugs", "visualiserId": null, "target": "GABA-A",
+      "ed50_mg": 37.1, "emax_pct": 100, "evidence": "derived", "source": "ashton2002",
+      "method": "Diazepam value scaled by the Ashton Manual equivalence (zopiclone 15 mg ≈ diazepam 10 mg). Equivalence tables vary between sources.",
+      "form": "tablet", "strengths_mg": [7.5], "note": null
+    },
+    "gabapentin": {
+      "name": "Gabapentin", "drugClass": "Gabapentinoids", "visualiserId": null, "target": "alpha2delta",
+      "ed50_mg": null, "emax_pct": null, "evidence": "none", "source": null,
+      "method": "No human receptor-occupancy data. Absorption is saturable, so occupancy would not rise in proportion to dose anyway.",
+      "form": "capsule", "strengths_mg": [100, 300, 400], "note": null
+    },
+    "pregabalin": {
+      "name": "Pregabalin", "drugClass": "Gabapentinoids", "visualiserId": null, "target": "alpha2delta",
+      "ed50_mg": null, "emax_pct": null, "evidence": "none", "source": null,
+      "method": "No human receptor-occupancy data.",
+      "form": "capsule", "strengths_mg": [25, 75, 150, 300], "note": null
+    }
+  }
+}

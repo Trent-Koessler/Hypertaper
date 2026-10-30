@@ -52,6 +52,11 @@ export interface DrugConfig {
    * 0 means unknown.
    */
   ec50?: number;
+  /**
+   * The highest occupancy the drug reaches (Emax), in percent. Some drugs never
+   * fill all their receptors (e.g. quetiapine at D2). Absent means 100%.
+   */
+  emax?: number;
 }
 
 export type SplitPreference = 'even' | 'fewest';
@@ -71,7 +76,7 @@ export interface WeanConfig {
   /**
    * 'percentage' cuts the dose by a fixed share each interval, 'fixed' by a
    * fixed amount, and 'occupancy' cuts receptor occupancy by a fixed number of
-   * percentage points (which needs `DrugConfig.ec50`).
+   * percentage points (which needs `DrugConfig.ec50`, and uses `DrugConfig.emax`).
    */
   reductionType: 'percentage' | 'fixed' | 'occupancy';
   reductionValue: number; // e.g., 10 (percent), 5 (mg) or 2.5 (occupancy points)

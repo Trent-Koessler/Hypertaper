@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, Copy, Check, Sigma } from 'lucide-react';
 import { DrugConfig, WeanConfig, ScheduleResult } from '../types';
-import { hasEC50, receptorOccupancy } from '../services/occupancy';
+import { effectiveEmax, hasEC50, receptorOccupancy } from '../services/occupancy';
 
 interface CalculationBreakdownProps {
   drug: DrugConfig;
@@ -37,7 +37,8 @@ const CalculationBreakdown: React.FC<CalculationBreakdownProps> = ({ drug, wean,
   // With the first reduction on the start date, interval 0 was taken before the plan began.
   const planIntervals = schedule.derivation.length - (wean.reduceOnStartDate ? 1 : 0);
   const ec50 = hasEC50(drug.ec50) ? drug.ec50 : null;
-  const occupancyOf = (dose: number): string => (ec50 === null ? '' : `${num(receptorOccupancy(dose, ec50), 1)}%`);
+  const emax = effectiveEmax(drug.emax);
+  const occupancyOf = (dose: number): string => (ec50 === null ? '' : `${num(receptorOccupancy(dose, ec50, emax), 1)}%`);
   const reductionText = wean.reductionType === 'percentage'
     ? `${num(wean.reductionValue)}%`
     : wean.reductionType === 'occupancy' ? `${num(wean.reductionValue)} occupancy pts` : `${num(wean.reductionValue)}${unit}`;
@@ -46,7 +47,7 @@ const CalculationBreakdown: React.FC<CalculationBreakdownProps> = ({ drug, wean,
     const curve = wean.reductionType === 'percentage'
       ? `target(n) = ${num(schedule.startingDose)} x (1 - ${num(wean.reductionValue)}/100)^n`
       : wean.reductionType === 'occupancy' && ec50 !== null
-        ? `occupancy(n) = ${num(receptorOccupancy(schedule.startingDose, ec50), 2)} - (n x ${num(wean.reductionValue)}) percent, where ${num(receptorOccupancy(schedule.startingDose, ec50), 2)}% = 100 x ${num(schedule.startingDose)} / (${num(schedule.startingDose)} + ${num(ec50)}) is the occupancy of the starting dose. Each occupancy is turned back into a dose with target(n) = ${num(ec50)} x occupancy(n) / (100 - occupancy(n)), the Michaelis-Menten model with an EC50 of ${num(ec50)}${unit}`
+        ? `occupancy(n) = ${num(receptorOccupancy(schedule.startingDose, ec50, emax), 2)} - (n x ${num(wean.reductionValue)}) percent, where ${num(receptorOccupancy(schedule.startingDose, ec50, emax), 2)}% = ${num(emax)} x ${num(schedule.startingDose)} / (${num(schedule.startingDose)} + ${num(ec50)}) is the occupancy of the starting dose. Each occupancy is turned back into a dose with target(n) = ${num(ec50)} x occupancy(n) / (${num(emax)} - occupancy(n)), the Michaelis-Menten model with an EC50 of ${num(ec50)}${unit} and a maximum occupancy of ${num(emax)}%`
         : `target(n) = ${num(schedule.startingDose)} - (n x ${num(wean.reductionValue)})`;
 
     const rounding = wean.rounding ?? 'below';
@@ -74,7 +75,7 @@ const CalculationBreakdown: React.FC<CalculationBreakdownProps> = ({ drug, wean,
           : `6. Morning and night. Each daily dose is divided into the most even morning and night doses the pieces allow, even if that takes more pieces, with any uneven part at night. The split never changes the daily total.`]
         : [])
     ];
-  }, [wean, schedule.startingDose, intervalDays, unit, liquid, liquidIncrement, drug.dosesPerDay, drug.splitPreference, ec50]);
+  }, [wean, schedule.startingDose, intervalDays, unit, liquid, liquidIncrement, drug.dosesPerDay, drug.splitPreference, ec50, emax]);
 
   const totalsRows = useMemo(
     () =>
@@ -110,7 +111,10 @@ const CalculationBreakdown: React.FC<CalculationBreakdownProps> = ({ drug, wean,
     lines.push(
       `  Reduction: ${wean.reductionType === 'percentage' ? `${num(wean.reductionValue)}% of the starting dose, compounded` : wean.reductionType === 'occupancy' ? `${num(wean.reductionValue)} percentage points of receptor occupancy` : `${num(wean.reductionValue)}${unit}, fixed`} every ${intervalDays} day(s)`
     );
-    if (ec50 !== null) lines.push(`  Dose for 50% receptor occupancy (EC50): ${num(ec50)}${unit}/day`);
+    if (ec50 !== null) {
+      lines.push(`  Dose for half the maximum receptor occupancy (EC50): ${num(ec50)}${unit}/day`);
+      lines.push(`  Maximum receptor occupancy (Emax): ${num(emax)}%`);
+    }
     lines.push(`  Stop dose: ${num(wean.minimumDoseThreshold)}${unit} (inclusive)`);
     lines.push(`  Start date: ${drug.startDate}`);
     lines.push('  Available pieces:');
@@ -178,7 +182,7 @@ const CalculationBreakdown: React.FC<CalculationBreakdownProps> = ({ drug, wean,
       schedule.warnings.forEach(w => lines.push(`  - ${w}`));
     }
     return lines.join('\n');
-  }, [drug, wean, schedule, unit, intervalDays, methodLines, totalsRows, liquid, liquidIncrement, liquidTerms, ec50]);
+  }, [drug, wean, schedule, unit, intervalDays, methodLines, totalsRows, liquid, liquidIncrement, liquidTerms, ec50, emax]);
 
   const copy = async () => {
     try {
@@ -243,8 +247,14 @@ const CalculationBreakdown: React.FC<CalculationBreakdownProps> = ({ drug, wean,
               </div>
               {ec50 !== null && (
                 <div className="flex justify-between border-b border-slate-100 dark:border-slate-700 py-1">
-                  <dt>Dose for 50% occupancy (EC50)</dt>
+                  <dt>Dose for half the maximum occupancy (EC50)</dt>
                   <dd className="font-mono">{num(ec50)}{unit}/day</dd>
+                </div>
+              )}
+              {ec50 !== null && emax < 100 && (
+                <div className="flex justify-between border-b border-slate-100 dark:border-slate-700 py-1">
+                  <dt>Maximum occupancy (Emax)</dt>
+                  <dd className="font-mono">{num(emax)}%</dd>
                 </div>
               )}
             </dl>
@@ -373,8 +383,8 @@ const CalculationBreakdown: React.FC<CalculationBreakdownProps> = ({ drug, wean,
               </li>
               {ec50 !== null && (
                 <li>
-                  Receptor occupancy is an estimate from the Michaelis-Menten model, 100 × dose ÷ (dose + EC50),
-                  using the EC50 entered. It is not measured in the patient, and published EC50 values vary
+                  Receptor occupancy is an estimate from the Michaelis-Menten model, Emax × dose ÷ (dose + EC50),
+                  using the EC50 and maximum occupancy (Emax) entered. It is not measured in the patient, and published EC50 values vary
                   between studies.
                 </li>
               )}

@@ -92,9 +92,10 @@ const MathsExplainer: React.FC = () => {
           <p className="text-sm text-slate-600 dark:text-slate-300 mb-3">
             Each cut takes the same <em>percentage</em> of what's left, not the same number of
             milligrams. So the steps get smaller as the dose gets smaller — 10% of 20mg is 2mg, but
-            10% of 2mg is 0.2mg. This is what "hyperbolic" means: it matches the fact that the last
-            few milligrams matter far more than the first few, and it stretches out the tail of the
-            taper instead of ending in a cliff.
+            10% of 2mg is 0.2mg. Mathematically the dose falls <em>exponentially</em>, which is why
+            this mode is called Exponential. It stretches out the tail of the taper instead of
+            ending in a cliff, and is a simple approximation of a hyperbolic taper (the Maudsley
+            guidelines often call it hyperbolic).
           </p>
 
           <p className="text-sm text-slate-600 dark:text-slate-300 mb-3">
@@ -107,12 +108,13 @@ const MathsExplainer: React.FC = () => {
           </p>
 
           <p className="text-sm text-slate-600 dark:text-slate-300 mb-3">
-            In <strong className="text-slate-800 dark:text-slate-100">occupancy</strong> mode the
+            In <strong className="text-slate-800 dark:text-slate-100">hyperbolic (occupancy)</strong> mode the
             curve is built from receptor occupancy instead, using the Michaelis–Menten model{' '}
             <span className="font-mono text-teal-700 dark:text-teal-300">
-              occupancy = 100 × dose ÷ (dose + EC50)
+              occupancy = Emax × dose ÷ (dose + EC50)
             </span>
-            , where EC50 is the dose that fills half the receptors. Occupancy falls by the same{' '}
+            , where Emax is the most the drug can occupy (100% unless a study found a lower
+            ceiling) and EC50 is the dose that gives half of that. Occupancy falls by the same{' '}
             <em>number of points</em> each time (e.g. 5 points), and each occupancy is turned back
             into a dose. This is how the Maudsley tables are built: the first cuts are large in
             milligrams and the last ones very small.

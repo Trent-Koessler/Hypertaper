@@ -1,22 +1,33 @@
 # HyperTaper
 
-HyperTaper is a pure client-side web application designed to assist clinicians in creating safe, structured, and visually clear deprescribing plans for medications. By allowing users to configure hyperbolic or fixed reduction strategies based on available pill denominations and split fractions, it automatically generates a precise daily schedule and graphical chart of the taper. Originally made for benzo weaning regimen calculations and based off of excel spreadsheet calcs that were converted to a Python program -- this website version is inspired by the The Maudsley Deprescribing Guidelines crew and their discussions of hyperbolic tapering.
+HyperTaper is a pure client-side web application designed to assist clinicians in creating safe, structured, and visually clear deprescribing plans for medications. By allowing users to configure exponential (percentage), hyperbolic (occupancy) or fixed reduction strategies based on available pill denominations and split fractions, it automatically generates a precise daily schedule and graphical chart of the taper. Originally made for benzo weaning regimen calculations and based off of excel spreadsheet calcs that were converted to a Python program -- this website version is inspired by the The Maudsley Deprescribing Guidelines crew and their discussions of hyperbolic tapering.
 
 **Live Application:** [https://trent-koessler.github.io/Hypertaper/](https://trent-koessler.github.io/Hypertaper/)
 
 ## Features
-- **Precise Tapering Algorithms**: Supports fixed-dose, hyperbolic (percentage-based) and
-  receptor-occupancy reductions.
-- **Receptor Occupancy (Michaelis–Menten) & 53-Drug Referenced PET Bank**: Includes a built-in,
-  literature-referenced $\text{EC}_{50}$ / $\text{ED}_{50}$ bank across **53 psychotropic medications**
-  (Antidepressants, Antipsychotics, Benzodiazepines & Z-Drugs, Gabapentinoids, and ADHD/autonomic
-  agents) grounded in human *in vivo* PET/SPECT neuroimaging meta-analyses (Sørensen et al., *Mol
-  Psychiatry* 2022; Meyer et al., *Am J Psychiatry* 2004; Lako et al., *J Clin Psychopharmacol*
-  2013; Horowitz et al., *Schizophr Bull* 2021) and *The Maudsley Deprescribing Guidelines*
-  (Horowitz & Taylor, 2024). Selecting a medication automatically populates its published
-  $\text{EC}_{50}$, Australian PBS tablet strengths, oral liquid concentration, and Maudsley stop
-  threshold, and links directly to the [18-Receptor Psychopharmacology Visualiser](https://trent-koessler.github.io/Psychopharmacology_visualiser/)
-  for multi-receptor occupancy and CYP/organ modifier adjustments (`?drug=...&dose=...&ec50=...&mode=occupancy`).
+- **Precise Tapering Algorithms**: Supports three reduction methods: **Exponential (%)**, which
+  cuts the same percentage of the current dose each interval (often called "hyperbolic" in the
+  Maudsley guidelines, which it approximates); **Hyperbolic (Occupancy)**, which lowers
+  estimated receptor occupancy by equal steps so the dose follows a true hyperbola; and
+  **Fixed Amount**.
+- **Receptor Occupancy (Michaelis–Menten)**: Enter the dose that gives half the maximum
+  receptor occupancy (EC50) and, if a study measured one, the maximum occupancy (Emax, 100% if
+  left blank). The chart and calculations then show each dose's estimated occupancy,
+  `Emax × dose ÷ (dose + EC50)` (the Schedule tab and EMR text show it when "Show receptor
+  occupancy" is ticked). The "Hyperbolic (Occupancy)" reduction method lowers occupancy by a
+  fixed number of percentage points each interval, which is how the Maudsley tables are built.
+- **Shared drug values**: Choosing a drug fills in its EC50 and Emax from
+  `services/ed50-bank.json`, a copy of the master file in the
+  [Psychopharmacology Visualiser](https://github.com/Trent-Koessler/Psychopharmacology_visualiser)
+  repository. Every value names its source and says how it was obtained: reported in the source,
+  back-calculated from published tables, fitted to published data, or derived (a rough estimate,
+  such as other benzodiazepines scaled from diazepam by an equivalence table). Drugs with no
+  usable human data are listed without a value. Choosing a drug changes nothing else you have
+  entered; a "Use typical strengths" link fills the tablet list on request. Do not edit the copy:
+  change the master and run `npm run sync-bank`.
+- **Visualiser links**: Drugs the Visualiser includes have an "Open in the Visualiser" link, and
+  the Visualiser's taper panel opens HyperTaper with the drug, dose, EC50 and Emax filled in
+  (`?drugId=&dose=&unit=&ec50=&emax=&mode=occupancy`).
 - **Start on the Clinic Date**: Choose whether the start date keeps the current dose for one
   interval (the default) or is the day the first reduction is taken, so the plan's dose changes
   line up with when the patient is seen without back-dating the start date. Tablets for the
@@ -82,13 +93,12 @@ HyperTaper is a pure client-side web application designed to assist clinicians i
   the stated increment. The concentration of a compounded liquid should be
   confirmed with the dispensing pharmacy, and its shelf life may mean the total
   volume needs to be supplied in several batches.
-- **Occupancy is a population PET model.** The percentage mode reduces the *dose* by a fixed
-  proportion. The occupancy mode reduces *estimated* receptor occupancy
-  linearly, using a simple Michaelis–Menten curve and the published population $\text{EC}_{50}$
-  from human PET/SPECT neuroimaging studies (or a patient-adjusted $\text{EC}_{50}$ passed from
-  the Psychopharmacology Visualiser). Individual pharmacokinetics (e.g., CYP2D6/2C19/1A2
-  metaboliser status, smoking, renal/hepatic function) shift a patient's true $\text{EC}_{50}$
-  around the population mean.
+- **Occupancy is a model.** The Exponential (%) mode reduces the *dose* by a fixed
+  proportion. The Hyperbolic (Occupancy) mode reduces *estimated* receptor occupancy
+  linearly, using a simple Michaelis–Menten curve and the EC50 and Emax entered. These come
+  from small imaging studies of mostly healthy volunteers and vary between studies; an
+  individual patient's occupancy can differ considerably (metabolism, interacting drugs,
+  smoking, kidney and liver function).
 - **Splitting is assumed exact.** Real halves and quarters vary by roughly
   10–20% of the intended piece, which matters most at the smallest doses.
 - **At most twice daily.** Doses can be given once daily or morning and night;

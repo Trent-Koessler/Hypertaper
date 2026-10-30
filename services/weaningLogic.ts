@@ -14,7 +14,7 @@ import {
   SplitPreference
 } from '../types';
 import { addDaysISO, formatDMY, isValidISODate, todayISO } from './dateUtils';
-import { doseForOccupancy, hasEC50, receptorOccupancy } from './occupancy';
+import { doseForOccupancy, effectiveEmax, hasEC50, receptorOccupancy } from './occupancy';
 
 /** A physically takeable piece: a whole tablet, or a half/quarter of one. */
 interface Piece {
@@ -481,7 +481,7 @@ function validate(drug: DrugConfig, wean: WeanConfig, warnings: string[]): boole
   }
   if (wean.reductionType === 'occupancy' && !hasEC50(drug.ec50)) {
     warnings.push(
-      `An occupancy taper needs the dose that gives 50% receptor occupancy (EC50, ${drug.unit}/day). Enter it under Receptor Occupancy, or choose another reduction method.`
+      `An occupancy taper needs the dose that gives half the maximum receptor occupancy (EC50, ${drug.unit}/day). Enter it under Receptor Occupancy, or choose another reduction method.`
     );
     usable = false;
   }
@@ -499,10 +499,10 @@ function validate(drug: DrugConfig, wean: WeanConfig, warnings: string[]): boole
  * previous target, so the value never accumulates floating-point drift and
  * always equals the formula shown to the clinician.
  */
-function targetAtInterval(startingDose: number, wean: WeanConfig, n: number, ec50 = 0): number {
+function targetAtInterval(startingDose: number, wean: WeanConfig, n: number, ec50 = 0, emax = 100): number {
   if (wean.reductionType === 'occupancy') {
     // Occupancy falls in a straight line; the dose that gives it does not.
-    return doseForOccupancy(targetOccupancy(startingDose, wean, n, ec50), ec50);
+    return doseForOccupancy(targetOccupancy(startingDose, wean, n, ec50, emax), ec50, emax);
   }
   return wean.reductionType === 'fixed'
     ? startingDose - n * wean.reductionValue
@@ -510,18 +510,18 @@ function targetAtInterval(startingDose: number, wean: WeanConfig, n: number, ec5
 }
 
 /** The occupancy an occupancy taper aims for at interval `n`, in percent. */
-function targetOccupancy(startingDose: number, wean: WeanConfig, n: number, ec50: number): number {
-  return receptorOccupancy(startingDose, ec50) - n * wean.reductionValue;
+function targetOccupancy(startingDose: number, wean: WeanConfig, n: number, ec50: number, emax: number): number {
+  return receptorOccupancy(startingDose, ec50, emax) - n * wean.reductionValue;
 }
 
-function targetFormula(startingDose: number, wean: WeanConfig, n: number, target: number, unit: string, ec50 = 0): string {
+function targetFormula(startingDose: number, wean: WeanConfig, n: number, target: number, unit: string, ec50 = 0, emax = 100): string {
   if (n === 0) return `${num(startingDose)}${unit} (starting dose)`;
   if (wean.reductionType === 'fixed') {
     return `${num(startingDose)} - (${n} x ${num(wean.reductionValue)}) = ${num(target)}${unit}`;
   }
   if (wean.reductionType === 'occupancy') {
-    const start = num(receptorOccupancy(startingDose, ec50), 2);
-    const occupancy = targetOccupancy(startingDose, wean, n, ec50);
+    const start = num(receptorOccupancy(startingDose, ec50, emax), 2);
+    const occupancy = targetOccupancy(startingDose, wean, n, ec50, emax);
     return `${start} - ${n} x ${num(wean.reductionValue)} = ${num(Math.max(0, occupancy), 2)}% -> ${num(target)}${unit}`;
   }
   const factor = num(1 - wean.reductionValue / 100, 6);
@@ -542,6 +542,7 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
   const startingDose = drug.currentDose;
   const unit = drug.unit;
   const ec50 = hasEC50(drug.ec50) ? drug.ec50 : 0;
+  const emax = effectiveEmax(drug.emax);
   const occupancyTaper = wean.reductionType === 'occupancy';
   const splitDaily = drug.dosesPerDay === 2;
   const rounding = wean.rounding ?? 'below';
@@ -560,7 +561,7 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
   let onLiquid = false;
 
   while (iteration < MAX_ITERATIONS) {
-    const target = targetAtInterval(startingDose, wean, iteration, ec50);
+    const target = targetAtInterval(startingDose, wean, iteration, ec50, emax);
     if (target <= EPSILON || target < threshold - EPSILON) break;
 
     const previousHold = holds[holds.length - 1];
@@ -650,7 +651,7 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
       intervalIndex: index,
       date,
       targetDose: hold.target,
-      targetFormula: targetFormula(startingDose, wean, index, hold.target, unit, ec50),
+      targetFormula: targetFormula(startingDose, wean, index, hold.target, unit, ec50, emax),
       actualDose,
       actualFormula: describePieces(pieces, actualDose, unit, liquidMl, drug.liquid),
       ...(split ? { splitFormula: describeSplit(split, unit, drug.liquid) } : {}),
@@ -730,7 +731,7 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
   }
 
   // Carry the ideal curve to the end date so it spans the same range as the plan.
-  const finalTarget = targetAtInterval(startingDose, wean, holds.length, ec50);
+  const finalTarget = targetAtInterval(startingDose, wean, holds.length, ec50, emax);
   targetCurve.push({ date: endDate, dose: roundDose(Math.max(0, finalTarget)) });
   // The chart starts on the start date; points before it belong to doses already taken.
   if (offsetDays > 0) {
@@ -752,7 +753,7 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
   const firstReduction = wean.reductionType === 'percentage'
     ? startingDose * (wean.reductionValue / 100)
     : occupancyTaper
-      ? startingDose - targetAtInterval(startingDose, wean, 1, ec50)
+      ? startingDose - targetAtInterval(startingDose, wean, 1, ec50, emax)
       : wean.reductionValue;
   if (smallestPiece > firstReduction) {
     warnings.push(
@@ -769,7 +770,7 @@ export function generateSchedule(drug: DrugConfig, wean: WeanConfig): ScheduleRe
   const previousDoseOf = (step: ScheduleStep) => step.actualDose + (step.reductionFromPrevious ?? 0);
   const dropSize = (step: ScheduleStep): number =>
     occupancyTaper
-      ? receptorOccupancy(previousDoseOf(step), ec50) - receptorOccupancy(step.actualDose, ec50)
+      ? receptorOccupancy(previousDoseOf(step), ec50, emax) - receptorOccupancy(step.actualDose, ec50, emax)
       : step.reductionPercent!;
   steps.forEach(step => {
     if (step.isStop || step.reductionPercent === null) return;
