@@ -10,6 +10,7 @@ import CalculationBreakdown from './components/CalculationBreakdown';
 import MathsExplainer from './components/MathsExplainer';
 import RoundingExplainer from './components/RoundingExplainer';
 import MaudsleyReference from './components/MaudsleyReference';
+import NswOdtReference from './components/NswOdtReference';
 import PatientHandout from './components/PatientHandout';
 import AppIcon from './components/AppIcon';
 import NumberInput from './components/NumberInput';
@@ -19,6 +20,13 @@ import {
   getMaudsleyRegimen,
   maudsleyCurve
 } from './services/maudsleyDiazepam';
+import {
+  NswOdtMedicine,
+  checkAgainstNsw,
+  nswMedicineForName,
+  nswOdtPreset,
+  parseNswPreset
+} from './services/nswOdtTaper';
 
 const COMMON_DRUGS = [
   ...Object.keys(DRUG_REFERENCE_BANK),
@@ -34,13 +42,14 @@ const EVIDENCE_LABELS: Record<DrugReferenceEntry['evidence'], string> = {
   none: 'No occupancy data'
 };
 
-type ResultTab = 'chart' | 'schedule' | 'handout' | 'maudsley';
+type ResultTab = 'chart' | 'schedule' | 'handout' | 'maudsley' | 'nsw-odt';
 
 const RESULT_TABS: { id: ResultTab; label: string }[] = [
   { id: 'chart', label: 'Chart' },
   { id: 'schedule', label: 'Schedule' },
   { id: 'handout', label: 'Patient handout' },
-  { id: 'maudsley', label: 'Maudsley' }
+  { id: 'maudsley', label: 'Maudsley' },
+  { id: 'nsw-odt', label: 'NSW opioid' }
 ];
 
 const createId = (): string =>
@@ -214,6 +223,16 @@ const App: React.FC = () => {
   useEffect(() => {
     if (typeof window === 'undefined' || !window.location.search) return;
     const params = new URLSearchParams(window.location.search);
+
+    // A link from the SUD Toolkit (?preset=nsw-methadone|nsw-buprenorphine&dose=)
+    // sets up an NSW opioid treatment taper. It carries a drug and a dose only.
+    const presetMedicine = parseNswPreset(params.get('preset'));
+    if (presetMedicine) {
+      const presetDose = Number(params.get('dose'));
+      applyNswPreset(presetMedicine, Number.isFinite(presetDose) && presetDose > 0 ? presetDose : undefined);
+      return;
+    }
+
     const drugParam = params.get('drugId') || params.get('drug');
     if (!drugParam) return;
     const positive = (key: string): number | undefined => {
@@ -285,6 +304,28 @@ const App: React.FC = () => {
     if (overlaidRegimenId !== regimen.id) setActiveTab('chart');
     setOverlaidRegimenId(current => (current === regimen.id ? null : regimen.id));
   };
+
+  /**
+   * Sets up an NSW methadone or buprenorphine taper. Keeps the clinician's dose
+   * when the same medicine is already entered and no dose is given.
+   */
+  const applyNswPreset = (medicine: NswOdtMedicine, dose?: number) => {
+    setIsCustomDrug(true);
+    setOverlaidRegimenId(null);
+    setDrug(prev => {
+      const keepDose = dose === undefined && nswMedicineForName(prev.name) === medicine ? prev.currentDose : dose;
+      return nswOdtPreset(medicine, keepDose, prev.startDate).drug;
+    });
+    setWean(nswOdtPreset(medicine, dose, todayISO()).wean);
+    setShowOccupancy(false);
+  };
+
+  const nswMedicine = nswMedicineForName(drug.name);
+  const nswChecks = useMemo(
+    () => (nswMedicine && drug.unit === 'mg' ? checkAgainstNsw(nswMedicine, schedule.steps) : []),
+    [nswMedicine, drug.unit, schedule.steps]
+  );
+  const nswOutOfRange = nswChecks.filter(c => c.tooFast || c.tooSoon).length;
 
   const addDenom = () => {
     setDrug(prev => ({
@@ -1132,6 +1173,23 @@ const App: React.FC = () => {
                  </div>
               </div>
 
+              {nswMedicine && nswChecks.length > 0 && (
+                <button
+                  onClick={() => setActiveTab('nsw-odt')}
+                  className={`w-full text-left text-sm rounded-xl px-4 py-2.5 border print:hidden ${
+                    nswOutOfRange === 0
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-800 dark:bg-emerald-900/20 dark:border-emerald-800 dark:text-emerald-300'
+                      : 'bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-900/20 dark:border-amber-800 dark:text-amber-300'
+                  }`}
+                >
+                  <strong>NSW 2026 opioid taper check:</strong>{' '}
+                  {nswOutOfRange === 0
+                    ? 'every reduction is within the NSW range for its band.'
+                    : `${nswOutOfRange} step${nswOutOfRange === 1 ? '' : 's'} outside the NSW range.`}{' '}
+                  <span className="underline">See the NSW opioid tab</span>
+                </button>
+              )}
+
               {/* Tabs keep the page short. Inactive panels stay in the page and
                   are only hidden on screen, so "Print plan" still prints them. */}
               <div role="tablist" aria-label="Plan views" className="flex flex-wrap gap-1 p-1 bg-slate-200/70 dark:bg-slate-800 rounded-xl w-fit print:hidden">
@@ -1382,6 +1440,15 @@ const App: React.FC = () => {
                   onLoadRegimen={loadMaudsleyRegimen}
                   overlaidRegimenId={overlaidRegimenId}
                   onToggleOverlay={toggleMaudsleyOverlay}
+                />
+              </div>
+
+              <div role="tabpanel" id="panel-nsw-odt" aria-labelledby="tab-nsw-odt" className={panelClass('nsw-odt')}>
+                <NswOdtReference
+                  medicine={nswMedicine}
+                  steps={schedule.steps}
+                  unit={drug.unit}
+                  onLoadPreset={medicine => applyNswPreset(medicine)}
                 />
               </div>
             </>
