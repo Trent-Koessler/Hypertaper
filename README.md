@@ -28,6 +28,13 @@ HyperTaper is a pure client-side web application designed to assist clinicians i
 - **Visualiser links**: Drugs the Visualiser includes have an "Open in the Visualiser" link, and
   the Visualiser's taper panel opens HyperTaper with the drug, dose, EC50 and Emax filled in
   (`?drugId=&dose=&unit=&ec50=&emax=&mode=occupancy`).
+- **NSW opioid treatment tapers**: the "NSW opioid" tab sets the calculator up for methadone
+  (5mg/mL liquid, measured to 0.1mL) or sublingual buprenorphine (8, 2 and 0.4mg tablets) and
+  checks every step of the plan against the reduction bands in NSW Health's *Safe prescribing of
+  medicines for the management of opioid dependence in NSW* (2026), sections 22.3-22.4. A banner
+  above the results says whether every step is within range. The SUD Toolkit links here with
+  `?preset=nsw-methadone&dose=` or `?preset=nsw-buprenorphine&dose=` - a drug and a dose only.
+  The band tables are also held in the SUD Toolkit (`data/otp-completion.js`); keep both in step.
 - **Start on the Clinic Date**: Choose whether the start date keeps the current dose for one
   interval (the default) or is the day the first reduction is taken, so the plan's dose changes
   line up with when the patient is seen without back-dating the start date. Tablets for the
