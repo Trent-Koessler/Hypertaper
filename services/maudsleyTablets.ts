@@ -26,6 +26,10 @@ export interface MaudsleyTabletStep {
   step: MaudsleyStep;
   am: MaudsleyDose;
   pm: MaudsleyDose;
+  /** Tablet-equivalents of each denomination needed to hold this step for `daysPerStep` days. */
+  stepTablets: { [denomId: string]: number };
+  /** Liquid in mL needed to hold this step for `daysPerStep` days; 0 when none. */
+  stepLiquidMl: number;
 }
 
 export interface MaudsleyTabletPlan {
@@ -97,13 +101,19 @@ export function maudsleyTabletPlan(
     const pm = makeUpMaudsleyDose(step.pm, denominations, liquid);
     if (!am.exact || !pm.exact) inexactStepCount++;
 
+    const stepTablets: { [denomId: string]: number } = {};
+    let stepLiquidMl = 0;
     for (const part of [am, pm]) {
       Object.entries(part.tablets).forEach(([id, count]) => {
-        totalTablets[id] = round((totalTablets[id] || 0) + count * days);
+        stepTablets[id] = round((stepTablets[id] || 0) + count * days);
       });
-      totalLiquidMl = round(totalLiquidMl + (part.liquidMl ?? 0) * days);
+      stepLiquidMl = round(stepLiquidMl + (part.liquidMl ?? 0) * days);
     }
-    return { step, am, pm };
+    Object.entries(stepTablets).forEach(([id, count]) => {
+      totalTablets[id] = round((totalTablets[id] || 0) + count);
+    });
+    totalLiquidMl = round(totalLiquidMl + stepLiquidMl);
+    return { step, am, pm, stepTablets, stepLiquidMl };
   });
 
   return { steps, inexactStepCount, totalTablets, totalLiquidMl, daysPerStep: days };

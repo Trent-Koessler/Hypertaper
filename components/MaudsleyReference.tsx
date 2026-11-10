@@ -2,13 +2,15 @@ import React, { useMemo, useState } from 'react';
 import { AlertCircle, BookOpen, ChevronDown, ChevronRight, Download, Droplet, LineChart as LineChartIcon } from 'lucide-react';
 import { Denomination, LiquidConfig } from '../types';
 import TabletVisualizer from './TabletVisualizer';
-import { MaudsleyDose, MaudsleyTabletPlan, maudsleyTabletPlan } from '../services/maudsleyTablets';
+import HoverInfo from './HoverInfo';
+import { MaudsleyDose, MaudsleyTabletPlan, MaudsleyTabletStep, maudsleyTabletPlan } from '../services/maudsleyTablets';
 import {
   MAUDSLEY_CITATION,
   MAUDSLEY_DIAZEPAM_REGIMENS,
   MAUDSLEY_NOTES,
   MaudsleyForm,
-  MaudsleyRegimen
+  MaudsleyRegimen,
+  occupancyMismatchExplanation
 } from '../services/maudsleyDiazepam';
 
 interface MaudsleyReferenceProps {
@@ -25,6 +27,8 @@ interface MaudsleyReferenceProps {
   liquid?: LiquidConfig;
   /** The plan's reduction interval, used as the days each step is held when counting supply. */
   intervalDays: number;
+  /** The plan's occupancy step in points, when the plan is an occupancy taper. */
+  planOccupancyPoints?: number;
 }
 
 const FORM_LABELS: Record<MaudsleyForm, string> = {
@@ -61,15 +65,13 @@ const DoseCell: React.FC<{
   dose: MaudsleyDose;
   denominations: Denomination[];
   unit: string;
-  liquid?: LiquidConfig;
-}> = ({ dose, denominations, unit, liquid }) => (
+}> = ({ dose, denominations, unit }) => (
   <td className={`px-3 py-1.5 border-l border-slate-100 dark:border-slate-700/60 ${dose.exact ? '' : 'bg-amber-50/70 dark:bg-amber-900/20'}`}>
     <TabletVisualizer
       counts={dose.tablets}
       denominations={denominations}
       unit={unit}
       liquidMl={dose.liquidMl}
-      concentration={liquid?.concentration}
       emptyLabel={dose.exact ? 'None' : '—'}
     />
     {!dose.exact && (
@@ -82,6 +84,40 @@ const DoseCell: React.FC<{
     )}
   </td>
 );
+
+/** Every tablet kind (and any liquid) needed to hold one step, so it can be dispensed step by step. */
+const StepSupplyCell: React.FC<{
+  step: MaudsleyTabletStep;
+  denominations: Denomination[];
+  unit: string;
+}> = ({ step, denominations, unit }) => {
+  const lines = (Object.entries(step.stepTablets) as [string, number][])
+    .filter(([, count]) => count > 0)
+    .map(([id, count]) => ({ denom: denominations.find(d => d.id === id), count }))
+    .filter((line): line is { denom: Denomination; count: number } => !!line.denom)
+    .sort((a, b) => b.denom.strength - a.denom.strength);
+  return (
+    <td className="px-3 py-1.5 border-l border-slate-100 dark:border-slate-700/60 whitespace-nowrap text-slate-700 dark:text-slate-200">
+      {lines.map(({ denom, count }) => {
+        const supply = Math.ceil(count - 1e-9);
+        return (
+          <span key={denom.id} className="block tabular-nums">
+            <span className="font-semibold">{formatCount(count)}</span> × {denom.strength}{unit}
+            {supply !== count && (
+              <span className="text-slate-400 dark:text-slate-500"> (supply {supply})</span>
+            )}
+          </span>
+        );
+      })}
+      {step.stepLiquidMl > 0 && (
+        <span className="block tabular-nums text-sky-700 dark:text-sky-300">
+          <span className="font-semibold">{formatMg(step.stepLiquidMl)}</span>mL liquid
+        </span>
+      )}
+      {lines.length === 0 && !(step.stepLiquidMl > 0) && <span className="text-slate-400">—</span>}
+    </td>
+  );
+};
 
 const RegimenTable: React.FC<{
   regimen: MaudsleyRegimen;
@@ -104,6 +140,9 @@ const RegimenTable: React.FC<{
             <>
               <th className="text-left font-medium px-3 py-2 border-l border-slate-200 dark:border-slate-700">Morning tablets</th>
               <th className="text-left font-medium px-3 py-2 border-l border-slate-200 dark:border-slate-700">Night tablets</th>
+              <th className="text-left font-medium px-3 py-2 border-l border-slate-200 dark:border-slate-700 whitespace-nowrap">
+                This step ({plan.daysPerStep} day{plan.daysPerStep === 1 ? '' : 's'})
+              </th>
             </>
           )}
         </tr>
@@ -128,13 +167,14 @@ const RegimenTable: React.FC<{
                 {step.liquidAlternative && <span className="text-slate-400 dark:text-slate-500">&nbsp;*</span>}
               </td>
               {made && (step.form === 'stop' ? (
-                <td colSpan={2} className="px-3 py-1.5 border-l border-slate-100 dark:border-slate-700/60 text-emerald-600 dark:text-emerald-400 font-medium">
+                <td colSpan={3} className="px-3 py-1.5 border-l border-slate-100 dark:border-slate-700/60 text-emerald-600 dark:text-emerald-400 font-medium">
                   Stop
                 </td>
               ) : (
                 <>
-                  <DoseCell dose={made.am} denominations={denominations} unit={unit} liquid={liquid} />
-                  <DoseCell dose={made.pm} denominations={denominations} unit={unit} liquid={liquid} />
+                  <DoseCell dose={made.am} denominations={denominations} unit={unit} />
+                  <DoseCell dose={made.pm} denominations={denominations} unit={unit} />
+                  <StepSupplyCell step={made} denominations={denominations} unit={unit} />
                 </>
               ))}
             </tr>
@@ -218,7 +258,8 @@ const MaudsleyReference: React.FC<MaudsleyReferenceProps> = ({
   unit,
   denominations,
   liquid,
-  intervalDays
+  intervalDays,
+  planOccupancyPoints
 }) => {
   const [isOpen, setIsOpen] = useState(true);
   const [activeId, setActiveId] = useState<string>(MAUDSLEY_DIAZEPAM_REGIMENS[0].id);
@@ -284,7 +325,14 @@ const MaudsleyReference: React.FC<MaudsleyReferenceProps> = ({
 
           <div>
             <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-200">{active.label}</h4>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{active.description}</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+              {active.description}{' '}
+              <HoverInfo
+                label="Why this doesn't match an occupancy taper"
+                text={occupancyMismatchExplanation(active, planOccupancyPoints)}
+                align="right"
+              />
+            </p>
           </div>
 
           <div className="flex flex-wrap gap-2">

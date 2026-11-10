@@ -328,3 +328,37 @@ export const maudsleyCurve = (
     dayIndex: index * Math.max(1, intervalDays),
     dose: step.total
   }));
+
+/** How far occupancy actually falls between consecutive steps of a regimen, in percentage points. */
+export const occupancyDrops = (
+  regimen: MaudsleyRegimen
+): { reductions: number; smallest: number; largest: number; average: number } => {
+  const drops = regimen.steps.slice(1).map((step, i) => regimen.steps[i].ro - step.ro);
+  const round1 = (value: number) => Math.round(value * 10) / 10;
+  return {
+    reductions: drops.length,
+    smallest: round1(Math.min(...drops)),
+    largest: round1(Math.max(...drops)),
+    average: round1(drops.reduce((sum, drop) => sum + drop, 0) / drops.length)
+  };
+};
+
+/**
+ * Plain-language reason a regimen does not line up with an occupancy taper of
+ * its headline step size, for a hover note. `planPoints` is the occupancy
+ * taper's own step, when the plan is one.
+ */
+export const occupancyMismatchExplanation = (regimen: MaudsleyRegimen, planPoints?: number): string => {
+  const d = occupancyDrops(regimen);
+  const plan = planPoints !== undefined
+    ? `This plan drops exactly ${planPoints} points every step. `
+    : 'An occupancy taper in HyperTaper drops exactly the points you set every step. ';
+  return (
+    `Why it doesn't match a ${regimen.occupancyStep}-point occupancy taper: the book's ${regimen.occupancyStep} points ` +
+    `is a ceiling, not the step size. It picks round doses that tablets (or a liquid) can make, so its drops ` +
+    `range from ${d.smallest} to ${d.largest} points, ${d.average} on average, over ${d.reductions} reductions. ` +
+    plan +
+    `Both use the same occupancy model (diazepam EC50 24.7mg/day reproduces the book's RO column), so the gap ` +
+    `is step size, not the maths. To follow this regimen's pace, set occupancy points to about ${d.average}.`
+  );
+};

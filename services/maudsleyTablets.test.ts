@@ -88,3 +88,14 @@ describe('maudsleyTabletPlan', () => {
     expect(withLiquid.totalLiquidMl).toBeGreaterThan(0);
   });
 });
+
+describe('per-step supply', () => {
+  it('counts each tablet kind for a step held 14 days', () => {
+    const plan = maudsleyTabletPlan(getMaudsleyRegimen('faster')!, fiveAndTwo, undefined, 14);
+    // Step 1: 30mg morning and night = 6 x 5mg each, so 12 a day for 14 days.
+    expect(plan.steps[0].stepTablets).toEqual({ five: 168 });
+    // Step 17: 3mg + 4mg = 1.5 + 2 x 2mg a day.
+    expect(plan.steps[16].stepTablets).toEqual({ two: 49 });
+    expect(plan.steps[23].stepTablets).toEqual({});
+  });
+});

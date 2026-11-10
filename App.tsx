@@ -18,6 +18,7 @@ import {
   MAUDSLEY_TABLET_STRENGTHS,
   MaudsleyRegimen,
   getMaudsleyRegimen,
+  occupancyMismatchExplanation,
   maudsleyCurve
 } from './services/maudsleyDiazepam';
 import {
@@ -272,9 +273,13 @@ const App: React.FC = () => {
     if (!regimen) return null;
     return {
       name: `Maudsley ${regimen.title.toLowerCase()} taper`,
-      points: maudsleyCurve(regimen, wean.intervalDays)
+      points: maudsleyCurve(regimen, wean.intervalDays),
+      explanation: occupancyMismatchExplanation(
+        regimen,
+        wean.reductionType === 'occupancy' ? wean.reductionValue : undefined
+      )
     };
-  }, [overlaidRegimenId, wean.intervalDays]);
+  }, [overlaidRegimenId, wean.intervalDays, wean.reductionType, wean.reductionValue]);
 
   /**
    * Sets up the calculator to start where a published regimen starts, using the
@@ -1445,6 +1450,7 @@ const App: React.FC = () => {
                   denominations={drug.denominations}
                   liquid={liquidOn ? liquid : undefined}
                   intervalDays={wean.intervalDays}
+                  planOccupancyPoints={wean.reductionType === 'occupancy' ? wean.reductionValue : undefined}
                 />
               </div>
 
