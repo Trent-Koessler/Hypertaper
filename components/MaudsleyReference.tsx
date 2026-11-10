@@ -32,9 +32,9 @@ interface MaudsleyReferenceProps {
 }
 
 const FORM_LABELS: Record<MaudsleyForm, string> = {
-  tablets: 'Use tablets',
-  'half-tablets': 'Use ½ tablets',
-  'quarter-tablets': 'Use ¼ tablets',
+  tablets: 'Tabs',
+  'half-tablets': '½ tabs',
+  'quarter-tablets': '¼ tabs',
   liquid: 'Liquid',
   stop: 'Stop'
 };
@@ -135,7 +135,13 @@ const RegimenTable: React.FC<{
           <th className="text-right font-medium px-3 py-2">AM (mg)</th>
           <th className="text-right font-medium px-3 py-2">PM (mg)</th>
           <th className="text-right font-medium px-3 py-2">Total daily (mg)</th>
-          <th className="text-left font-medium px-3 py-2">Form</th>
+          <th className="text-left font-medium px-2 py-2 w-16">
+            Book form{' '}
+            <HoverInfo
+              label="About the book form column"
+              text="How the book makes up each dose: whole tablets, half or quarter tablets, or liquid. * marks steps where the book says a liquid could be used instead. Your own tablets and liquid are shown in the columns to the right."
+            />
+          </th>
           {plan && (
             <>
               <th className="text-left font-medium px-3 py-2 border-l border-slate-200 dark:border-slate-700">Morning tablets</th>
@@ -162,9 +168,9 @@ const RegimenTable: React.FC<{
               <td className="px-3 py-1.5 text-right tabular-nums font-medium text-slate-800 dark:text-slate-100">
                 {formatMg(step.total)}
               </td>
-              <td className={`px-3 py-1.5 whitespace-nowrap ${FORM_STYLES[step.form]}`}>
+              <td className={`px-2 py-1.5 w-16 leading-tight ${FORM_STYLES[step.form]}`}>
                 {FORM_LABELS[step.form]}
-                {step.liquidAlternative && <span className="text-slate-400 dark:text-slate-500">&nbsp;*</span>}
+                {step.liquidAlternative && <span className="text-slate-400 dark:text-slate-500"> *</span>}
               </td>
               {made && (step.form === 'stop' ? (
                 <td colSpan={3} className="px-3 py-1.5 border-l border-slate-100 dark:border-slate-700/60 text-emerald-600 dark:text-emerald-400 font-medium">

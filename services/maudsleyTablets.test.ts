@@ -99,3 +99,23 @@ describe('per-step supply', () => {
     expect(plan.steps[23].stepTablets).toEqual({});
   });
 });
+
+describe('staying on liquid', () => {
+  it('keeps the slower taper on liquid once it starts, as the book does', () => {
+    const plan = maudsleyTabletPlan(getMaudsleyRegimen('slower')!, fiveAndTwo, liquid, 14);
+    const firstLiquid = plan.steps.findIndex(s => (s.am.liquidMl ?? 0) > 0 || (s.pm.liquidMl ?? 0) > 0);
+    // Step 52 (9.6mg) is the first dose 5mg and 2mg quarters cannot make.
+    expect(plan.steps[firstLiquid].step.step).toBe(52);
+    plan.steps.slice(firstLiquid).filter(s => s.step.total > 0).forEach(s => {
+      expect(s.am.tablets).toEqual({});
+      expect(s.pm.tablets).toEqual({});
+    });
+    // Step 56 is 4mg twice a day, which tablets could make, but it stays on liquid.
+    expect(plan.steps[55].am.liquidMl).toBe(4);
+  });
+
+  it('still uses tablets before the first liquid step', () => {
+    const plan = maudsleyTabletPlan(getMaudsleyRegimen('slower')!, fiveAndTwo, liquid, 14);
+    expect(plan.steps[50].am.tablets).toEqual({ five: 1 });
+  });
+});
