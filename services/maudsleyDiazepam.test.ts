@@ -89,3 +89,11 @@ describe('Maudsley diazepam regimens', () => {
     expect(maudsleyCurve(faster, 0)[3].dayIndex).toBe(3);
   });
 });
+
+describe('occupancy drops', () => {
+  it('shows the faster taper averages about 3 points, never more than its 5-point ceiling', async () => {
+    const { occupancyDrops } = await import('./maudsleyDiazepam');
+    const drops = occupancyDrops(getMaudsleyRegimen('faster')!);
+    expect(drops).toEqual({ reductions: 23, smallest: 1.8, largest: 4.6, average: 3.1 });
+  });
+});

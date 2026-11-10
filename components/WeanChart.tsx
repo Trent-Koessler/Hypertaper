@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { ScheduleResult } from '../types';
+import HoverInfo from './HoverInfo';
 import { addDaysISO, parseISODateLocal } from '../services/dateUtils';
 import { receptorOccupancy } from '../services/occupancy';
 
@@ -17,7 +18,7 @@ interface WeanChartProps {
    * A published reference regimen drawn alongside the plan for comparison.
    * Its doses are the source's, sampled at the plan's own reduction interval.
    */
-  reference?: { name: string; points: { dayIndex: number; dose: number }[] } | null;
+  reference?: { name: string; points: { dayIndex: number; dose: number }[]; explanation?: string } | null;
   /** Dose for half the maximum receptor occupancy; when set, the y axis can show occupancy. */
   ec50?: number | null;
   /** Maximum receptor occupancy in percent; 100 when absent. */
@@ -398,6 +399,12 @@ const WeanChart: React.FC<WeanChartProps> = ({
           {reference.name} is numbered by step, not by date. It is drawn from the plan&apos;s start date at the
           plan&apos;s own reduction interval, so the two curves share a cadence; the guideline itself specifies
           only that reductions are made every 1&ndash;4 weeks.
+          {reference.explanation && (
+            <>
+              {' '}Why the curves differ{' '}
+              <HoverInfo label="Why the curves differ" text={reference.explanation} align="right" />
+            </>
+          )}
         </p>
       )}
 
