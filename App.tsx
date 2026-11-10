@@ -1440,6 +1440,11 @@ const App: React.FC = () => {
                   onLoadRegimen={loadMaudsleyRegimen}
                   overlaidRegimenId={overlaidRegimenId}
                   onToggleOverlay={toggleMaudsleyOverlay}
+                  drugName={drug.name}
+                  unit={drug.unit}
+                  denominations={drug.denominations}
+                  liquid={liquidOn ? liquid : undefined}
+                  intervalDays={wean.intervalDays}
                 />
               </div>
 
