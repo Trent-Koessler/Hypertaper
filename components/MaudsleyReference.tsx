@@ -3,7 +3,13 @@ import { AlertCircle, BookOpen, ChevronDown, ChevronRight, Download, Droplet, Li
 import { Denomination, LiquidConfig } from '../types';
 import TabletVisualizer from './TabletVisualizer';
 import HoverInfo from './HoverInfo';
-import { MaudsleyDose, MaudsleyTabletPlan, MaudsleyTabletStep, maudsleyTabletPlan } from '../services/maudsleyTablets';
+import {
+  MaudsleyDose,
+  MaudsleyTabletPlan,
+  MaudsleyTabletStep,
+  MaudsleyTabletStyle,
+  maudsleyTabletPlan
+} from '../services/maudsleyTablets';
 import {
   MAUDSLEY_CITATION,
   MAUDSLEY_DIAZEPAM_REGIMENS,
@@ -119,6 +125,49 @@ const StepSupplyCell: React.FC<{
   );
 };
 
+const TABLET_STYLES: { value: MaudsleyTabletStyle; label: string; hint: string }[] = [
+  {
+    value: 'book',
+    label: 'Book style',
+    hint: 'Tablets are only cut where the book cuts them, matching the Book form column.'
+  },
+  {
+    value: 'app',
+    label: 'App choice',
+    hint: 'The fewest tablets to take, even if that means cutting one the book keeps whole.'
+  }
+];
+
+/** Switches the tablet columns between the book's way of making each dose and the app's. */
+const TabletStyleToggle: React.FC<{
+  value: MaudsleyTabletStyle;
+  onChange: (style: MaudsleyTabletStyle) => void;
+}> = ({ value, onChange }) => (
+  <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+    <span className="text-xs font-medium text-slate-600 dark:text-slate-300">Show tablets:</span>
+    <div role="radiogroup" aria-label="Show tablets" className="inline-flex rounded-full bg-slate-100 dark:bg-slate-700 p-0.5">
+      {TABLET_STYLES.map(option => (
+        <button
+          key={option.value}
+          role="radio"
+          aria-checked={value === option.value}
+          onClick={() => onChange(option.value)}
+          className={`text-xs px-3 py-1 rounded-full transition-colors font-medium ${
+            value === option.value
+              ? 'bg-white dark:bg-slate-900 text-teal-700 dark:text-teal-300 shadow-sm'
+              : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+          }`}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+    <span className="text-[11px] text-slate-500 dark:text-slate-400">
+      {TABLET_STYLES.find(option => option.value === value)?.hint}
+    </span>
+  </div>
+);
+
 const RegimenTable: React.FC<{
   regimen: MaudsleyRegimen;
   plan: MaudsleyTabletPlan | null;
@@ -139,7 +188,7 @@ const RegimenTable: React.FC<{
             Book form{' '}
             <HoverInfo
               label="About the book form column"
-              text="How the book makes up each dose: whole tablets, half or quarter tablets, or liquid. * marks steps where the book says a liquid could be used instead. Your own tablets and liquid are shown in the columns to the right."
+              text="How the book makes up each dose: whole tablets, half or quarter tablets, or liquid. * marks steps where the book says a liquid could be used instead. Your own tablets and liquid are shown in the columns to the right: 'Book style' cuts them only where the book does, 'App choice' uses the fewest tablets."
             />
           </th>
           {plan && (
@@ -270,6 +319,7 @@ const MaudsleyReference: React.FC<MaudsleyReferenceProps> = ({
   const [isOpen, setIsOpen] = useState(true);
   const [activeId, setActiveId] = useState<string>(MAUDSLEY_DIAZEPAM_REGIMENS[0].id);
   const [showNotes, setShowNotes] = useState(false);
+  const [tabletStyle, setTabletStyle] = useState<MaudsleyTabletStyle>('book');
 
   const active = MAUDSLEY_DIAZEPAM_REGIMENS.find(r => r.id === activeId) ?? MAUDSLEY_DIAZEPAM_REGIMENS[0];
   const isOverlaid = overlaidRegimenId === active.id;
@@ -278,10 +328,10 @@ const MaudsleyReference: React.FC<MaudsleyReferenceProps> = ({
   // The book's doses are in mg, so tablets in another unit cannot make them up.
   const canMakeUp = unit === 'mg' && (usableTablets.length > 0 || !!liquid);
   const plan = useMemo(
-    () => (canMakeUp ? maudsleyTabletPlan(active, usableTablets, liquid, intervalDays) : null),
+    () => (canMakeUp ? maudsleyTabletPlan(active, usableTablets, liquid, intervalDays, tabletStyle) : null),
     // usableTablets is rebuilt each render; its source is the dependency.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [canMakeUp, active, denominations, liquid, intervalDays]
+    [canMakeUp, active, denominations, liquid, intervalDays, tabletStyle]
   );
   const tabletList = usableTablets.map(d => `${d.strength}${unit}${SPLIT_LABELS[d.canSplit ?? 'no']}`).join(', ');
   const notDiazepam = drugName.trim().toLowerCase() !== 'diazepam';
@@ -401,6 +451,10 @@ const MaudsleyReference: React.FC<MaudsleyReferenceProps> = ({
                   : 'Tick “Use a liquid formulation” in the sidebar, or add another tablet strength, to fill them.'}
               </span>
             </div>
+          )}
+
+          {plan && (
+            <TabletStyleToggle value={tabletStyle} onChange={setTabletStyle} />
           )}
 
           <RegimenTable regimen={active} plan={plan} denominations={usableTablets} unit={unit} liquid={liquid} />

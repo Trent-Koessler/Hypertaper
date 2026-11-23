@@ -119,3 +119,27 @@ describe('staying on liquid', () => {
     expect(plan.steps[50].am.tablets).toEqual({ five: 1 });
   });
 });
+
+describe('book style', () => {
+  const faster = getMaudsleyRegimen('faster')!;
+  const stepOf = (plan: ReturnType<typeof maudsleyTabletPlan>, n: number) => plan.steps.find(s => s.step.step === n)!;
+
+  it('uses whole tablets on a step the book makes from whole tablets', () => {
+    const app = maudsleyTabletPlan(faster, fiveAndTwo, undefined, 14, 'app');
+    const book = maudsleyTabletPlan(faster, fiveAndTwo, undefined, 14, 'book');
+    // Step 12 is 8mg: the app cuts a 2mg (5 + 1.5 x 2), the book style uses 4 x 2mg.
+    expect(stepOf(app, 12).am.tablets).toEqual({ five: 1, two: 1.5 });
+    expect(stepOf(book, 12).am.tablets).toEqual({ two: 4 });
+  });
+
+  it('still cuts tablets where the book does, and makes every dose exactly', () => {
+    const book = maudsleyTabletPlan(faster, fiveAndTwo, undefined, 14, 'book');
+    expect(book.inexactStepCount).toBe(0);
+    // Step 17 is 3mg morning, a half-tablet step in the book.
+    expect(stepOf(book, 17).am.tablets).toEqual({ two: 1.5 });
+    book.steps.forEach(({ step, am, pm }) => {
+      expect(am.dose).toBe(step.am);
+      expect(pm.dose).toBe(step.pm);
+    });
+  });
+});

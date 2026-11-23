@@ -73,7 +73,7 @@ const TabletVisualizer: React.FC<TabletVisualizerProps> = ({ counts, denominatio
 
               {fullPills > 5 && <span className="text-xs text-slate-500 dark:text-slate-400 pl-2">+{fullPills - 5}</span>}
             </div>
-            <span className="text-xs font-medium text-slate-700 dark:text-slate-200">
+            <span className="text-xs font-medium text-slate-700 dark:text-slate-200 whitespace-nowrap">
               {count} x {denom.strength}{unit}
             </span>
           </div>
