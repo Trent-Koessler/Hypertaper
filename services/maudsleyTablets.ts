@@ -8,7 +8,7 @@
  * the app.
  */
 import { Denomination, DoseBreakdown, LiquidConfig } from '../types';
-import { MaudsleyRegimen, MaudsleyStep } from './maudsleyDiazepam';
+import { MaudsleyForm, MaudsleyRegimen, MaudsleyStep } from './maudsleyDiazepam';
 import { findBestTabletCombination, findLiquidDose, TabletCombination } from './weaningLogic';
 
 /** Slack for comparing doses, far below any real tablet or measure. */
@@ -43,6 +43,35 @@ export interface MaudsleyTabletPlan {
   daysPerStep: number;
 }
 
+/**
+ * How the tablets for each step are picked.
+ * - 'app': the fewest pieces, cutting a tablet whenever that saves a piece.
+ * - 'book': only cut tablets as far as the book does for that step (whole
+ *   tablets on a 'tablets' step, halves on a 'half-tablets' step), falling back
+ *   to the app's choice when the dose can't be made that way.
+ */
+export type MaudsleyTabletStyle = 'app' | 'book';
+
+type SplitLevel = NonNullable<Denomination['canSplit']>;
+
+const SPLIT_RANK: Record<SplitLevel, number> = { no: 0, half: 1, quarter: 2 };
+
+/** The furthest the book cuts a tablet for each form; undefined means no limit. */
+const BOOK_SPLIT: Record<MaudsleyForm, SplitLevel | undefined> = {
+  tablets: 'no',
+  'half-tablets': 'half',
+  'quarter-tablets': 'quarter',
+  liquid: undefined,
+  stop: undefined
+};
+
+/** The same tablets, but none cut further than `max`. */
+function limitSplitting(denominations: Denomination[], max: SplitLevel): Denomination[] {
+  return denominations.map(d =>
+    SPLIT_RANK[d.canSplit ?? 'no'] > SPLIT_RANK[max] ? { ...d, canSplit: max } : d
+  );
+}
+
 const round = (value: number): number => Math.round(value * 1e6) / 1e6;
 
 const toDose = (target: number, combination: TabletCombination, exact: boolean): MaudsleyDose => ({
@@ -63,17 +92,26 @@ const isExact = (combination: TabletCombination, target: number): boolean =>
  *
  * With `preferLiquid` (and a liquid switched on) the liquid is tried first, so
  * a patient already on liquid is not moved back to tablets.
+ *
+ * With `maxSplit`, tablets cut no further than that are tried first, so the
+ * dose is made up the way the book makes it when the tablets allow.
  */
 export function makeUpMaudsleyDose(
   target: number,
   denominations: Denomination[],
   liquid?: LiquidConfig,
-  preferLiquid = false
+  preferLiquid = false,
+  maxSplit?: SplitLevel
 ): MaudsleyDose {
   if (!(target > 0)) return { target: 0, exact: true, dose: 0, tablets: {}, pieces: [] };
 
   const fromLiquid = liquid?.enabled ? findLiquidDose(target, liquid, false, 'nearest') : null;
   if (preferLiquid && fromLiquid && isExact(fromLiquid, target)) return toDose(target, fromLiquid, true);
+
+  if (maxSplit) {
+    const limited = findBestTabletCombination(target, limitSplitting(denominations, maxSplit), false, { rounding: 'below' });
+    if (isExact(limited, target)) return toDose(target, limited, true);
+  }
 
   const tablets = findBestTabletCombination(target, denominations, false, { rounding: 'below' });
   if (isExact(tablets, target)) return toDose(target, tablets, true);
@@ -97,7 +135,8 @@ export function maudsleyTabletPlan(
   regimen: MaudsleyRegimen,
   denominations: Denomination[],
   liquid: LiquidConfig | undefined,
-  daysPerStep: number
+  daysPerStep: number,
+  style: MaudsleyTabletStyle = 'app'
 ): MaudsleyTabletPlan {
   const days = Math.max(1, daysPerStep);
   const totalTablets: { [denomId: string]: number } = {};
@@ -108,12 +147,13 @@ export function maudsleyTabletPlan(
   const usesLiquid = (dose: MaudsleyDose) => (dose.liquidMl ?? 0) > 0;
 
   const steps = regimen.steps.map(step => {
-    let am = makeUpMaudsleyDose(step.am, denominations, liquid, onLiquid);
-    let pm = makeUpMaudsleyDose(step.pm, denominations, liquid, onLiquid);
+    const maxSplit = style === 'book' ? BOOK_SPLIT[step.form] : undefined;
+    let am = makeUpMaudsleyDose(step.am, denominations, liquid, onLiquid, maxSplit);
+    let pm = makeUpMaudsleyDose(step.pm, denominations, liquid, onLiquid, maxSplit);
     if (!onLiquid && (usesLiquid(am) || usesLiquid(pm))) {
       onLiquid = true;
-      am = makeUpMaudsleyDose(step.am, denominations, liquid, true);
-      pm = makeUpMaudsleyDose(step.pm, denominations, liquid, true);
+      am = makeUpMaudsleyDose(step.am, denominations, liquid, true, maxSplit);
+      pm = makeUpMaudsleyDose(step.pm, denominations, liquid, true, maxSplit);
     }
     if (!am.exact || !pm.exact) inexactStepCount++;
 
