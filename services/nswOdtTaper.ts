@@ -26,6 +26,12 @@ export interface NswTaperBand {
   toMg: number;
   /** The reduction range the guide gives for this band, in mg. */
   stepMg: [number, number];
+  /**
+   * Set only where the guide's printed figure is a probable erratum. The
+   * printed text is shown as is, and `stepMg` then holds the range the app
+   * checks against instead (see METHADONE_BOTTOM_ERRATUM).
+   */
+  printedStep?: string;
 }
 
 export const NSW_ODT_SOURCE =
@@ -38,8 +44,24 @@ export const METHADONE_BANDS: NswTaperBand[] = [
   { label: '30-60mg', fromMg: 30, toMg: 60, stepMg: [2.5, 5] },
   { label: '15-30mg', fromMg: 15, toMg: 30, stepMg: [1, 2.5] },
   { label: '5-15mg', fromMg: 5, toMg: 15, stepMg: [0.5, 1] },
-  { label: '<5mg', fromMg: 0, toMg: 5, stepMg: [0.5, 1.25] }
+  // Probable erratum in the source: see METHADONE_BOTTOM_ERRATUM. The guide's
+  // figure is shown as printed; steps are checked against 0.5-1mg.
+  { label: '<5mg', fromMg: 0, toMg: 5, stepMg: [0.5, 1], printedStep: '1.25-0.5mg' }
 ];
+
+/**
+ * Section 22.3 (p92) prints the <5mg methadone step as "1.25-0.5 mg". That is
+ * a bigger cut than the 0.5-1mg step for 5-15mg, which goes against the
+ * hyperbolic tapering the same section asks for, so it is probably a typo.
+ * Decided (November 2026), as in the SUD Toolkit: show it as printed with this
+ * warning, and check steps below 5mg against no more than 1mg. Until now this
+ * app read the figure as 0.5-1.25mg, which turned the typo into advice.
+ */
+export const METHADONE_BOTTOM_ERRATUM =
+  'Below 5mg the guide prints "1.25-0.5mg". That is a bigger cut than the 0.5-1mg step for 5-15mg, ' +
+  'which goes against hyperbolic tapering, so it is probably a typo in the source. Below 5mg, keep each ' +
+  'cut no bigger than 0.5-1mg, keep the percentage cut roughly constant, and use prescriber judgement. ' +
+  'The check here flags any cut over 1mg.';
 
 export const BUPRENORPHINE_BANDS: NswTaperBand[] = [
   { label: '>16mg', fromMg: 16, toMg: Infinity, stepMg: [2, 4] },

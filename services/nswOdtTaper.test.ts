@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   BUPRENORPHINE_BANDS,
   METHADONE_BANDS,
+  METHADONE_BOTTOM_ERRATUM,
   checkAgainstNsw,
   nswBandFor,
   nswMedicineForName,
@@ -16,8 +17,25 @@ import { generateSchedule } from './weaningLogic';
 describe('NSW 2026 taper bands', () => {
   it('match section 22.3 (methadone)', () => {
     expect(METHADONE_BANDS.map(b => b.stepMg)).toEqual([
-      [10, 20], [5, 10], [2.5, 5], [1, 2.5], [0.5, 1], [0.5, 1.25]
+      [10, 20], [5, 10], [2.5, 5], [1, 2.5], [0.5, 1], [0.5, 1]
     ]);
+  });
+
+  it('show the <5mg methadone figure as printed, flagged as a probable typo', () => {
+    // The guide prints "1.25-0.5 mg"; the check uses no more than 1mg instead.
+    expect(METHADONE_BANDS[5].printedStep).toBe('1.25-0.5mg');
+    expect(METHADONE_BOTTOM_ERRATUM).toMatch(/probably a typo/);
+    expect(METHADONE_BOTTOM_ERRATUM).toMatch(/no bigger than 0.5-1mg/);
+    expect(BUPRENORPHINE_BANDS.every(b => b.printedStep === undefined)).toBe(true);
+  });
+
+  it('flag a methadone cut over 1mg below 5mg', () => {
+    const step = (actualDose: number, isStop = false) =>
+      ({ actualDose, durationDays: 14, isStop }) as unknown as Parameters<typeof checkAgainstNsw>[1][number];
+    const [ok, fast] = checkAgainstNsw('methadone', [step(4), step(3), step(1.75)]);
+    expect(ok.tooFast).toBe(false);
+    expect(fast.drop).toBe(1.25);
+    expect(fast.tooFast).toBe(true);
   });
 
   it('match section 22.4 (sublingual buprenorphine)', () => {

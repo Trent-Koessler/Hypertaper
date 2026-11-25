@@ -5,7 +5,9 @@ import {
   NSW_ODT_LABELS,
   NSW_ODT_NOTES,
   NSW_ODT_SOURCE,
+  METHADONE_BOTTOM_ERRATUM,
   NswOdtMedicine,
+  NswTaperBand,
   bandsFor,
   checkAgainstNsw
 } from '../services/nswOdtTaper';
@@ -23,6 +25,10 @@ const formatMg = (value: number): string => String(parseFloat(value.toFixed(3)))
 const stepRange = ([lo, hi]: [number, number]): string =>
   lo === hi ? `${formatMg(lo)}mg` : `${formatMg(lo)}-${formatMg(hi)}mg`;
 
+/** The range the check uses, noting the guide's figure where that is a probable typo. */
+const checkRange = (band: NswTaperBand): string =>
+  band.printedStep ? `up to ${formatMg(band.stepMg[1])}mg` : stepRange(band.stepMg);
+
 const BandTable: React.FC<{ medicine: NswOdtMedicine }> = ({ medicine }) => (
   <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
     <table className="w-full text-xs border-collapse">
@@ -36,7 +42,16 @@ const BandTable: React.FC<{ medicine: NswOdtMedicine }> = ({ medicine }) => (
         {bandsFor(medicine).map(band => (
           <tr key={band.label} className="border-t border-slate-100 dark:border-slate-700/60">
             <td className="px-3 py-1.5 text-slate-600 dark:text-slate-300">{band.label}</td>
-            <td className="px-3 py-1.5 font-medium text-slate-800 dark:text-slate-100">{stepRange(band.stepMg)}</td>
+            <td className="px-3 py-1.5 font-medium text-slate-800 dark:text-slate-100">
+              {band.printedStep ? (
+                <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-300">
+                  {band.printedStep} as printed
+                  <AlertTriangle size={12} aria-label="Probable typo, see the note below" />
+                </span>
+              ) : (
+                stepRange(band.stepMg)
+              )}
+            </td>
           </tr>
         ))}
       </tbody>
@@ -135,7 +150,7 @@ const NswOdtReference: React.FC<NswOdtReferenceProps> = ({ medicine, steps, unit
                       <td className="px-3 py-1.5 text-right tabular-nums">{c.toDose === 0 ? 'Stop' : formatMg(c.toDose)}</td>
                       <td className="px-3 py-1.5 text-right tabular-nums font-medium">{formatMg(c.drop)}</td>
                       <td className="px-3 py-1.5 text-slate-500 dark:text-slate-400">
-                        {stepRange(c.band.stepMg)} <span className="opacity-70">({c.band.label})</span>
+                        {checkRange(c.band)} <span className="opacity-70">({c.band.label})</span>
                       </td>
                       <td
                         className={`px-3 py-1.5 whitespace-nowrap ${
@@ -163,6 +178,12 @@ const NswOdtReference: React.FC<NswOdtReferenceProps> = ({ medicine, steps, unit
         <div key={m} className="space-y-2">
           <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-200">{NSW_ODT_LABELS[m]}</h4>
           <BandTable medicine={m} />
+          {m === 'methadone' && (
+            <p className="text-[11px] flex items-start gap-1.5 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 px-3 py-2 text-amber-800 dark:text-amber-200">
+              <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+              <span>{METHADONE_BOTTOM_ERRATUM}</span>
+            </p>
+          )}
           <ul className="text-[11px] text-slate-500 dark:text-slate-400 space-y-1 list-disc list-inside">
             {NSW_ODT_NOTES[m].map(note => (
               <li key={note}>{note}</li>
